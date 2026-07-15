@@ -1,3 +1,26 @@
+# CINECA Leonardo (A100-64GB, x86_64) cluster configuration for the eval listener.
+#
+# DEPRECATED (Stage 4 of the eval-listener-unification plan): the canonical source
+# of truth for this config is now the `eval_cluster_view` field on the `leonardo` HPC
+# object in `hpc/hpc.py`. This YAML is retained as a compat shim — the listener still
+# loads it when given the file path, but prefer the cluster-name form:
+#   python eval/unified_eval_listener.py --cluster-config leonardo ...
+# (or `python -m hpc.launch --job_type eval_listener --cluster-config leonardo ...`).
+# The HPC view and this YAML are kept byte-identical; edits must go in hpc/hpc.py.
+#
+# Why a cluster config (vs the bare --sbatch-script path): without it the
+# listener falls back to Jupiter-shaped hardware defaults (gpus_per_node 8,
+# cpus_per_node 96, ~1.8 TB/node) and computes --cpus-per-task / --mem that a
+# Leonardo node (4 GPU, 32 CPU, ~512 GB) cannot satisfy → "CPU count per node
+# can not be satisfied". The hardware block below makes the per-GPU CPU/mem
+# proportioning resolve to Leonardo-valid values. It also populates
+# CONDA_ENV_PATHS so a per-model `conda_env:` override (eval-qwen35 for the
+# qwen3_5 tmax models) resolves to a real prefix.
+#
+# User-scoped paths are $USER-parameterized (load_cluster_config expands $USER/~ in every string
+# value), so each operator resolves to their own $WORK. The conda_envs / cuda_home prefixes stay
+# pinned to bfeuer00's on purpose — they are world-readable and shared read-only, so a new operator
+# does not have to rebuild them.
 
 cluster_name: leonardo
 
@@ -16,16 +39,16 @@ conda_envs:
   eval-qwen35: /leonardo_work/AIFAC_5C0_290/bfeuer00/miniforge3/envs/eval-qwen35
 
 paths:
-  project_root: /leonardo_work/AIFAC_5C0_290/bfeuer00/code/OpenThoughts-Agent
-  hf_cache: /leonardo_work/AIFAC_5C0_290/bfeuer00/data/hub
-  eval_jobs_dir: /leonardo_work/AIFAC_5C0_290/bfeuer00/eval_jobs
+  project_root: /leonardo_work/AIFAC_5C0_290/$USER/code/OpenThoughts-Agent
+  hf_cache: /leonardo_work/AIFAC_5C0_290/$USER/data/hub
+  eval_jobs_dir: /leonardo_work/AIFAC_5C0_290/$USER/eval_jobs
   eval_logs_dir: eval/leonardo/logs
   listener_logs_dir: experiments/listener_logs
   sbatch_script: eval/leonardo/eval_harbor.sbatch
   dp_sbatch_script: eval/leonardo/eval_harbor.sbatch
-  harbor_src: /leonardo_work/AIFAC_5C0_290/bfeuer00/code/harbor/src
+  harbor_src: /leonardo_work/AIFAC_5C0_290/$USER/code/harbor/src
   datasets_dirs:
-    - /leonardo_work/AIFAC_5C0_290/bfeuer00/data/hub
+    - /leonardo_work/AIFAC_5C0_290/$USER/data/hub
   secrets_file: ~/secrets.env
 
 proxy:

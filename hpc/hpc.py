@@ -527,8 +527,12 @@ elif [[ $NODE_HOST == jpb* ]] || [[ $NODE_HOST == jpc* ]]; then
     PROXYCHAINS_MODE="binary"
 elif [[ $NODE_HOST == lrdn* ]] || [[ $NODE_HOST == *.leonardo.local ]]; then
     LOGIN_NODE="login05-ext.leonardo.cineca.it"
-    # Leonardo uses x86 build - binary wrapper approach
-    PROXYCHAINS_BIN="/leonardo/home/userexternal/bfeuer00/proxychains/bin/proxychains4"
+    # Leonardo uses x86 build - binary wrapper approach.
+    # Use the $WORK copy, NOT the one under /leonardo/home/userexternal/bfeuer00: Leonardo homes are
+    # mode 700, so the home path is readable only by its owner and any other operator gets
+    # "Permission denied" here. The $WORK copy is world-executable and is the same binary the eval
+    # cluster view already points at (see leonardo.eval_cluster_view / proxychains_binary below).
+    PROXYCHAINS_BIN="/leonardo_work/AIFAC_5C0_290/bfeuer00/proxychains/bin/proxychains4"
     PROXYCHAINS_MODE="binary"
 else
     echo "[proxy] Unknown cluster for node $NODE_HOST - skipping proxy setup"
@@ -1151,7 +1155,11 @@ leonardo = HPC(
     conda_activate="source /leonardo_work/AIFAC_5C0_290/bfeuer00/miniforge3/etc/profile.d/conda.sh && conda activate otagent",
     # Note: PBS Pro is NOT used here — Leonardo uses SLURM
     # Stage 4: eval-listener cluster config (single source of truth — was eval/clusters/leonardo.yaml).
-    # User-scoped paths mirror that yaml (bfeuer00's); parameterizing via dotenv is a follow-up.
+    # User-scoped paths (the operator's own checkout + writable output dirs) are `$USER`-parameterized;
+    # `to_eval_cluster_view()` expands them at call time, so each operator resolves to their own $WORK.
+    # The conda envs / cuda_home below stay pinned to bfeuer00's prefixes ON PURPOSE: they are
+    # world-readable and shared read-only, so a new operator need not rebuild them. Per-operator
+    # envs are a follow-up (an operator with their own env can point conda_envs at it).
     eval_cluster_view={
         "cluster_name": "leonardo",
         "baseline_model_configs": "eval/configs/baseline_model_configs_minimal.yaml",
@@ -1166,15 +1174,15 @@ leonardo = HPC(
             "eval-qwen35": "/leonardo_work/AIFAC_5C0_290/bfeuer00/miniforge3/envs/eval-qwen35",
         },
         "paths": {
-            "project_root": "/leonardo_work/AIFAC_5C0_290/bfeuer00/code/OpenThoughts-Agent",
-            "hf_cache": "/leonardo_work/AIFAC_5C0_290/bfeuer00/data/hub",
-            "eval_jobs_dir": "/leonardo_work/AIFAC_5C0_290/bfeuer00/eval_jobs",
+            "project_root": "/leonardo_work/AIFAC_5C0_290/$USER/code/OpenThoughts-Agent",
+            "hf_cache": "/leonardo_work/AIFAC_5C0_290/$USER/data/hub",
+            "eval_jobs_dir": "/leonardo_work/AIFAC_5C0_290/$USER/eval_jobs",
             "eval_logs_dir": "eval/leonardo/logs",
             "listener_logs_dir": "experiments/listener_logs",
             "sbatch_script": "eval/leonardo/eval_harbor.sbatch",
             "dp_sbatch_script": "eval/leonardo/eval_harbor.sbatch",
-            "harbor_src": "/leonardo_work/AIFAC_5C0_290/bfeuer00/code/harbor/src",
-            "datasets_dirs": ["/leonardo_work/AIFAC_5C0_290/bfeuer00/data/hub"],
+            "harbor_src": "/leonardo_work/AIFAC_5C0_290/$USER/code/harbor/src",
+            "datasets_dirs": ["/leonardo_work/AIFAC_5C0_290/$USER/data/hub"],
             "secrets_file": "~/secrets.env",
         },
         "proxy": {"enabled": False},
