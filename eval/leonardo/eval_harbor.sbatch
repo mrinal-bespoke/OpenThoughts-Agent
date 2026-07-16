@@ -123,9 +123,13 @@ echo "=============================================="
 # Leonardo Environment Setup
 # ==============================================================================
 
-# Hardcode WORK — Leonardo sets WORK=/leonardo_work/AIFAC_5C0_290 system-wide
-# which is the project dir, not the user dir. Override unconditionally.
-WORK="/leonardo_work/AIFAC_5C0_290/bfeuer00"
+# Override WORK — Leonardo sets WORK=/leonardo_work/AIFAC_5C0_290 system-wide
+# which is the project dir, not the user dir. Override unconditionally, but scope it
+# to the SUBMITTING user, not a hardcoded one: this runs under whoever fired the eval,
+# and another user's dirs are mode 755, so a hardcoded user makes every operator run
+# that user's checkout + dotenv (and write to dirs they don't own). SLURM exports the
+# submitter's $USER into the job env; fall back to `id -un` if it is ever unset.
+WORK="/leonardo_work/AIFAC_5C0_290/${USER:-$(id -un)}"
 DCFT="${WORK}/code/OpenThoughts-Agent"
 
 # Resolve the harbor config path from CONFIG_YAML (mirrors the canonical
