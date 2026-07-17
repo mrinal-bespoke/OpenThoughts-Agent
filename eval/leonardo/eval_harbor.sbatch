@@ -160,9 +160,18 @@ unset PYTHONPATH
 # with the qwen3_5 vLLM impl; ENVIRONMENT_MAP §2f). Activating it for the whole
 # job would break harbor (`PackageNotFoundError: harbor`), so we scope it to the
 # serve subprocess via SERVE_PYTHON_BIN + SERVE_ENV_PREFIX below.
-source "${WORK}/miniforge3/etc/profile.d/conda.sh"
+# Conda ROOT is decoupled from WORK: the conda envs (harbor, vLLM, CUDA — big
+# compiled packages) are shared read-only and need not be per-operator, whereas
+# WORK must be the submitter's (writable eval_jobs / caches). Default the root to
+# ${WORK}/miniforge3 so an operator who cloned their own env just works; override
+# with OTAGENT_CONDA_ROOT to point at a shared root (e.g. another user's, which is
+# world-readable + executable). Must be an EXPORTED var at submit time — this line
+# runs before the dotenv is sourced below. Rendered with the override unset this is
+# byte-identical to the previous hardcoded "${WORK}/miniforge3".
+CONDA_ROOT="${OTAGENT_CONDA_ROOT:-${WORK}/miniforge3}"
+source "${CONDA_ROOT}/etc/profile.d/conda.sh"
 conda activate otagent
-echo "Conda env (main/harbor): otagent (prefix $CONDA_PREFIX)"
+echo "Conda env (main/harbor): otagent (root ${CONDA_ROOT}, prefix $CONDA_PREFIX)"
 
 # All build deps (CUDA, libstdc++, etc.) managed via conda — no module loads.
 # Prepend conda's lib to ensure its libstdc++ wins over any system/module versions.
@@ -177,7 +186,7 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 # link fails `-lcuda`), the libcuda stub on LIBRARY_PATH, FLASH_ATTN backend.
 # These apply ONLY to the serve srun (env prefix), NOT the otagent main shell.
 EVAL_CONDA_ENV="${EVAL_CONDA_ENV:-otagent}"
-SERVE_CONDA_PREFIX="${WORK}/miniforge3/envs/${EVAL_CONDA_ENV}"
+SERVE_CONDA_PREFIX="${CONDA_ROOT}/envs/${EVAL_CONDA_ENV}"
 SERVE_ENV_PREFIX=()
 if [ "$EVAL_CONDA_ENV" = "eval-qwen35" ]; then
     SERVE_ENV_PREFIX=( env \
