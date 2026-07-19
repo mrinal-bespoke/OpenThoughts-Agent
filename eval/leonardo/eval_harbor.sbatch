@@ -343,6 +343,18 @@ cleanup() {
     if [ -n "${VLLM_PID:-}" ]; then
         kill "$VLLM_PID" 2>/dev/null || true
     fi
+    # Served-model reverse tunnels (installed-agent fires only; unset otherwise).
+    # cleanup() is defined BEFORE the tunnel block runs, so these must be ${VAR:-}
+    # guarded — they are legitimately undefined on the terminus-2 path. The pinggy
+    # child is a `while true` supervisor loop: kill the loop first, then any ssh it
+    # spawned, or the retry loop immediately reconnects the tunnel we just closed.
+    if [ -n "${PINGGY_PID:-}" ]; then
+        kill "$PINGGY_PID" 2>/dev/null || true
+        pkill -P "$PINGGY_PID" 2>/dev/null || true
+    fi
+    if [ -n "${NGROK_PID:-}" ]; then
+        kill "$NGROK_PID" 2>/dev/null || true
+    fi
     # Kill SSH tunnel (all ssh -D processes for this job)
     pkill -f "ssh.*-D.*${TUNNEL_PORT:-27003}" 2>/dev/null || true
     # Kill ssh-agent (env vars saved by start_proxy_tunnel.sh)
@@ -743,6 +755,191 @@ echo "[DEBUG] EXTRA_HARBOR_ARGS=$EXTRA_HARBOR_ARGS"
 echo "[DEBUG] Full harbor command:"
 echo "  harbor jobs start -p $DATASET_PATH --n-concurrent $N_CONCURRENT --agent terminus-2 --model hosted_vllm/$SERVED_MODEL --env daytona ... $EXTRA_HARBOR_ARGS"
 
+# ==============================================================================
+# Harness class detection (Cat 1/2 "host-side" vs Cat 3 "installed" agents).
+#
+# HOST-SIDE agents (terminus-*, oracle, nop) run in the orchestrator process on
+# this compute node and call vLLM at http://$MASTER_ADDR:8000 directly — the
+# Daytona sandbox only runs shell commands and never reaches the model. That is
+# why Leonardo evals need no served-model tunnel today (ops/leonardo/ops.md).
+#
+# INSTALLED agents (opencode, swe-agent, openhands, aider, mini-swe-agent) are
+# installed INTO the sandbox (harbor/agents/installed/*: environment.exec ->
+# npm/pip install) and read OPENAI_BASE_URL from inside it. A cloud sandbox
+# cannot route to this node's localhost, so they require a public reverse
+# tunnel. Mirrors eval/jupiter/eval_harbor.sbatch (agent-class case + tunnel).
+#
+# The agent name is authoritative from the harbor config YAML, not the CLI: the
+# listener selects a scaffold via --config-yaml, and harbor's CLI --agent
+# REPLACES (not merges) the YAML agent block.
+#
+# STAGE 1: detection + logging only — no behavior depends on _NEEDS_TUNNEL yet.
+# ==============================================================================
+# NOTE (deliberate divergence from eval/jupiter/eval_harbor.sbatch): jupiter writes
+#   ... 2>/dev/null || echo "terminus-2"
+# which swallows EVERY failure mode (missing pyyaml, unreadable/malformed config) and
+# silently asserts "terminus-2" -> an installed-agent fire would skip the tunnel with no
+# trace in the log. We keep the same SAFE DEFAULT (terminus-2 => no tunnel => today's
+# behavior) but make a genuine parse failure LOUD. A config with no `agents:` block still
+# defaults quietly; only a real error warns.
+_AGENT_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/agentname_err.XXXXXX")"
+_CFG_AGENT_NAME=$($PYTHON_BIN -c "
+import yaml
+with open('$HARBOR_CONFIG') as f:
+    cfg = yaml.safe_load(f)
+agents = cfg.get('agents', [])
+print(agents[0].get('name', 'terminus-2') if agents else 'terminus-2')
+" 2>"$_AGENT_ERR_FILE") || {
+    echo "[tunnel] WARNING: agent-name detection FAILED for $HARBOR_CONFIG — defaulting to 'terminus-2' (no tunnel)."
+    echo "[tunnel]          cause: $(tail -1 "$_AGENT_ERR_FILE" 2>/dev/null)"
+    echo "[tunnel]          if this was meant to be an installed-agent fire, it will now run WITHOUT a tunnel."
+    _CFG_AGENT_NAME="terminus-2"
+}
+rm -f "$_AGENT_ERR_FILE"
+
+_NEEDS_TUNNEL=false
+case "$_CFG_AGENT_NAME" in
+    terminus|terminus-1|terminus-2|terminus-kira|oracle|nop)
+        echo "[tunnel] Agent '$_CFG_AGENT_NAME' runs on host — tunnel not needed."
+        ;;
+    *)
+        _NEEDS_TUNNEL=true
+        echo "[tunnel] Installed agent '$_CFG_AGENT_NAME' runs in sandbox — need tunnel to vLLM."
+        ;;
+esac
+
+# ==============================================================================
+# Served-model reverse tunnel (installed agents ONLY).
+#
+# Exposes the node-local vLLM (port 8000) on a public URL the Daytona sandbox can
+# reach. Pinggy first (persistent URL, no bandwidth cap), ngrok as fallback. The
+# SSH/curl egress is wrapped in proxychains because Leonardo compute nodes have no
+# direct internet — the SOCKS5 tunnel opened earlier is the only way out.
+#
+# Ported from eval/jupiter/eval_harbor.sbatch. Not entered at all when
+# _NEEDS_TUNNEL=false, so the terminus-2 path is untouched.
+# ==============================================================================
+PINGGY_PID=""
+NGROK_PID=""
+TUNNEL_URL=""
+
+if [ "$_NEEDS_TUNNEL" = true ]; then
+    _VLLM_PORT=8000   # Leonardo serves vLLM on a fixed port (cf. VLLM_HEALTH_URL above)
+
+    # --- Pinggy (preferred) ---
+    if [ -n "${EVAL_PINGGY_URL:-}" ] && [ -n "${EVAL_PINGGY_TOKEN:-}" ]; then
+        echo "[pinggy] Starting SSH tunnel to ${EVAL_PINGGY_URL} (port $_VLLM_PORT)..."
+        PINGGY_LOG="${DCFT}/eval/leonardo/logs/pinggy_${SLURM_JOB_ID}.log"
+
+        # proxychains prefix so the SSH-out can reach pro.pinggy.io from a no-internet node.
+        _PINGGY_PROXY_PREFIX=""
+        if [ -x "$PROXYCHAINS_BIN" ] && [ -n "${PROXYCHAINS_CONF_FILE:-}" ]; then
+            _PINGGY_PROXY_PREFIX="$PROXYCHAINS_BIN -f $PROXYCHAINS_CONF_FILE "
+        fi
+
+        bash -c "while true; do ${_PINGGY_PROXY_PREFIX}ssh -p 443 \
+            -R0:localhost:${_VLLM_PORT} \
+            -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ExitOnForwardFailure=yes \
+            ${EVAL_PINGGY_TOKEN}@pro.pinggy.io; \
+            sleep 10; done" > "$PINGGY_LOG" 2>&1 &
+        PINGGY_PID=$!
+        echo "[pinggy] Started with PID $PINGGY_PID"
+
+        _PINGGY_OK=true
+        for _pg_i in $(seq 1 5); do
+            sleep 1
+            if ! kill -0 "$PINGGY_PID" 2>/dev/null; then
+                echo "[pinggy] ERROR: tunnel process died during startup"
+                cat "$PINGGY_LOG" 2>/dev/null || true
+                PINGGY_PID=""
+                _PINGGY_OK=false
+                break
+            fi
+        done
+
+        if [ "$_PINGGY_OK" = true ]; then
+            TUNNEL_URL="https://${EVAL_PINGGY_URL}"
+            _pinggy_verified=false
+            for _vt in $(seq 1 6); do
+                if proxied curl -sk --connect-timeout 5 "${TUNNEL_URL}/v1/models" 2>/dev/null | grep -q "object"; then
+                    echo "[pinggy] Connectivity verified: $TUNNEL_URL (attempt $_vt)"
+                    _pinggy_verified=true
+                    break
+                fi
+                sleep 5
+            done
+            if [ "$_pinggy_verified" = false ]; then
+                echo "[pinggy] FATAL: connectivity test failed after 6 attempts (30s)."
+                echo "[pinggy] Installed-agent fires require a working tunnel; refusing to waste compute."
+                echo "[pinggy] Last 20 lines of $PINGGY_LOG:"
+                tail -20 "$PINGGY_LOG" 2>/dev/null || true
+                cleanup
+                exit 1
+            fi
+        fi
+    fi
+
+    # --- ngrok fallback ---
+    if [ -z "$TUNNEL_URL" ]; then
+        echo "[tunnel] Pinggy not available, trying ngrok..."
+        NGROK_PATH="${EVAL_NGROK_PATH:-$HOME/ngrok}"
+        NGROK_LOG="${DCFT}/eval/leonardo/logs/ngrok_${SLURM_JOB_ID}.log"
+
+        if [ -x "$NGROK_PATH" ]; then
+            NGROK_URL=$(curl -s localhost:4040/api/tunnels 2>/dev/null \
+                | grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4)
+            if [ -n "$NGROK_URL" ]; then
+                echo "[ngrok] Reusing existing tunnel: $NGROK_URL"
+                TUNNEL_URL="$NGROK_URL"
+            else
+                "$NGROK_PATH" http "$_VLLM_PORT" --log=stdout > "$NGROK_LOG" 2>&1 &
+                NGROK_PID=$!
+                echo "[ngrok] Started with PID $NGROK_PID, tunneling port $_VLLM_PORT"
+                for _ng_i in $(seq 1 15); do
+                    NGROK_URL=$(curl -s localhost:4040/api/tunnels 2>/dev/null \
+                        | grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4)
+                    [ -n "$NGROK_URL" ] && break
+                    echo "[ngrok] Waiting for tunnel (attempt $_ng_i/15)..."
+                    sleep 2
+                done
+                if [ -n "$NGROK_URL" ]; then
+                    TUNNEL_URL="$NGROK_URL"
+                    echo "[ngrok] Tunnel established: $NGROK_URL"
+                else
+                    echo "[ngrok] ERROR: Failed to establish ngrok tunnel"
+                    cat "$NGROK_LOG" 2>/dev/null || true
+                fi
+            fi
+        else
+            echo "[ngrok] Binary not found at $NGROK_PATH, skipping."
+        fi
+    fi
+
+    # --- Final check: never run an installed agent without a reachable model ---
+    if [ -z "$TUNNEL_URL" ]; then
+        echo "ERROR: No tunnel available for installed agent '$_CFG_AGENT_NAME'."
+        echo "  Set EVAL_PINGGY_URL + EVAL_PINGGY_TOKEN (listener: --pinggy-url/--pinggy-token),"
+        echo "  or install ngrok at \$EVAL_NGROK_PATH (default \$HOME/ngrok)."
+        cleanup
+        exit 1
+    fi
+    echo "[tunnel] Served-model URL for sandboxes: ${TUNNEL_URL}/v1"
+
+    # Installed agents read the endpoint from the ENV, not from --agent-kwarg:
+    # harbor's opencode integration injects OPENAI_BASE_URL/OPENAI_API_KEY into
+    # opencode.json (harbor/agents/installed/opencode.py reads OPENAI_BASE_URL), and
+    # openhands takes LLM_BASE_URL in preference to any api_base kwarg.
+    # Exported ONLY inside this branch, so the terminus-2 path leaves them unset.
+    export OPENAI_API_KEY="fake_key"
+    export OPENAI_API_BASE="${TUNNEL_URL}/v1"
+    export OPENAI_BASE_URL="${TUNNEL_URL}/v1"
+    if [ "$_CFG_AGENT_NAME" = "openhands" ]; then
+        export LLM_BASE_URL="${TUNNEL_URL}/v1"
+    fi
+fi
+
 # Check if a previous job dir exists for this run tag (for resume)
 if [ -d "$RUN_DIR" ] && [ -f "$RUN_DIR/config.json" ]; then
     echo "Found existing job dir, resuming: $RUN_DIR"
@@ -795,19 +992,40 @@ PY
         "${RESUME_FILTER_FLAGS[@]}"
 else
     echo "Starting new job"
-    proxied harbor jobs start \
-        -p "$DATASET_PATH" \
-        --n-concurrent "$N_CONCURRENT" \
-        --agent terminus-2 \
-        --model "hosted_vllm/$SERVED_MODEL" \
-        --env "daytona" \
-        --agent-kwarg "api_base=http://${MASTER_ADDR}:8000/v1" \
-        --agent-kwarg "key=fake_key" \
-        --agent-kwarg "model_info=$MODEL_INFO_JSON" \
-        --n-attempts 3 \
-        --job-name "$RUN_TAG" \
-        --jobs-dir "$EVAL_JOBS_DIR" \
-        --config "$HARBOR_CONFIG" \
+    # Argv is built as an array so the installed-agent (Cat 3) branch can OMIT flags
+    # rather than override them. Two differences for installed agents:
+    #   1. NO --agent / --model. Harbor's CLI --agent REPLACES (not merges) the YAML
+    #      agent block, so passing it wipes the scaffold the --config-yaml selected.
+    #      Agent name AND model alias therefore come from the harbor config, which is
+    #      also where the `vllm/<id>` provider prefix opencode needs must live (the
+    #      default hosted_vllm/<id> alias has no baseURL and dies "undefined/chat/completions").
+    #   2. api_base points at the public tunnel, not this node — the agent runs INSIDE
+    #      the Daytona sandbox and cannot reach $MASTER_ADDR.
+    # The terminus-2 branch is the pre-existing argv verbatim, in the original order.
+    _HARBOR_CMD=( harbor jobs start
+        -p "$DATASET_PATH"
+        --n-concurrent "$N_CONCURRENT" )
+    if [ "$_NEEDS_TUNNEL" = true ]; then
+        _HARBOR_CMD+=( --env "daytona"
+            --agent-kwarg "api_base=${TUNNEL_URL}/v1" )
+    else
+        _HARBOR_CMD+=( --agent terminus-2
+            --model "hosted_vllm/$SERVED_MODEL"
+            --env "daytona"
+            --agent-kwarg "api_base=http://${MASTER_ADDR}:8000/v1" )
+    fi
+    _HARBOR_CMD+=( --agent-kwarg "key=fake_key"
+        --agent-kwarg "model_info=$MODEL_INFO_JSON"
+        --n-attempts 3
+        --job-name "$RUN_TAG"
+        --jobs-dir "$EVAL_JOBS_DIR"
+        --config "$HARBOR_CONFIG" )
+    # $EXTRA_HARBOR_ARGS stays UNQUOTED on purpose: it is a flag STRING that must
+    # word-split into separate argv tokens (production passes e.g.
+    # "--timeout-multiplier 2.0 --environment-kwarg auto_snapshot=true"). Quoting it,
+    # or appending it as one array element, collapses it into a single argv token and
+    # harbor silently drops those flags.
+    proxied "${_HARBOR_CMD[@]}" \
         $EXTRA_HARBOR_ARGS
 fi
 SB_EXIT=$?
