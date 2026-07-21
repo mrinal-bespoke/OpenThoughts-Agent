@@ -1,0 +1,45 @@
+# Harbor EVAL config — opencode installed agent (Cat 3).
+#
+# opencode runs INSIDE the Daytona sandbox (npm i -g opencode-ai) and calls back to the
+# served vLLM over the network, so this needs a served-model tunnel (pinggy on Leonardo).
+# model_name stays `openai/override-at-runtime`: the launcher rewrites it to `vllm/<served_id>`
+# and exports OPENAI_BASE_URL / OPENAI_API_KEY from the tunnel endpoint at runtime.
+#
+# Structure = the proven openhands EVAL skeleton (verifier ENABLED so trials score) with the
+# opencode agent block from hpc/harbor_yaml/datagen/opencode_ctx32k.yaml.
+# force_build: false → reuse warm harbor__* snapshots (the installed-agent default; sidesteps
+# the org snapshot cap the way Ben's campaign does).
+n_attempts: 3
+timeout_multiplier: 1.0
+orchestrator:
+  type: local
+  n_concurrent_trials: 8
+  quiet: false
+  plain_output: true
+  retry:
+    max_retries: 10
+    exclude_exceptions:
+      - AgentTimeoutError
+      - AgentEnvironmentTimeoutError
+      - BadRequestError
+      - VerifierTimeoutError
+      - SummarizationTimeout
+      - SummarizationTimeoutError
+      - ContextLengthExceededError
+    wait_multiplier: 1.0
+    min_wait_sec: 1.0
+    max_wait_sec: 60.0
+environment:
+  type: daytona
+  force_build: false
+verifier:
+  max_timeout_sec: 14400
+agents:
+  - name: opencode
+    model_name: openai/override-at-runtime
+    max_timeout_sec: 7200
+    override_setup_timeout_sec: 600   # opencode npm-installs inside the sandbox; needs setup headroom
+    kwargs:
+      opencode_config: {}
+datasets:
+  - path: examples/tasks
