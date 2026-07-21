@@ -1162,7 +1162,14 @@ run_dir = os.environ["RUN_DIR"]
 run_tag = os.environ["RUN_TAG"]
 username = os.environ.get("UPLOAD_USERNAME", os.environ.get("USER", "leonardo"))
 error_mode = os.environ.get("UPLOAD_MODE", "skip_on_error")
-hf_repo_id = sanitize_hf_repo_id(f"DCAgent2/{run_tag}")
+# Trace-upload HF org. Default DCAgent2 (byte-identical to before), but overridable via
+# EVAL_UPLOAD_HF_ORG so an operator without DCAgent2 write — or when DCAgent2 is at its
+# storage cap — can drop traces in another org they can write to (e.g. laion). The DB
+# registration keeps its own hf_traces_link pointing wherever they landed, so the LB link
+# follows the org. Set `export EVAL_UPLOAD_HF_ORG=<org>` before launch (SLURM --export=ALL
+# forwards it into the job).
+hf_upload_org = os.environ.get("EVAL_UPLOAD_HF_ORG", "DCAgent2")
+hf_repo_id = sanitize_hf_repo_id(f"{hf_upload_org}/{run_tag}")
 hf_token = os.environ["HF_TOKEN"]
 
 print(f"[uploader] upload_eval_results(path={run_dir!r}, username={username!r}, "
