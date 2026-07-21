@@ -837,8 +837,13 @@ if [ "$_NEEDS_TUNNEL" = true ]; then
             _PINGGY_PROXY_PREFIX="$PROXYCHAINS_BIN -f $PROXYCHAINS_CONF_FILE "
         fi
 
+        # -R0:127.0.0.1 (not localhost): the ssh runs under proxychains, whose localnet rules are
+        # IP-based (127.0.0.0/8). The hostname "localhost" does NOT match them, so proxychains tries
+        # to SOCKS-proxy the reverse-forward's connection to vLLM and fails with "Address family for
+        # hostname not supported" — the sandbox reaches pinggy but pinggy can't forward to vLLM. The
+        # literal 127.0.0.1 matches the localnet rule → passed through direct.
         bash -c "while true; do ${_PINGGY_PROXY_PREFIX}ssh -p 443 \
-            -R0:localhost:${_VLLM_PORT} \
+            -R0:127.0.0.1:${_VLLM_PORT} \
             -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
             -o ExitOnForwardFailure=yes \
