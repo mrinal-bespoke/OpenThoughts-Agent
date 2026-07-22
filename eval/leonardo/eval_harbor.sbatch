@@ -23,11 +23,17 @@
 #
 # Env vars from listener:
 #   EVAL_N_CONCURRENT       (default: 64)
+#   EVAL_N_ATTEMPTS         (default: 3)
 #   EVAL_GPU_MEMORY_UTIL    (default: 0.85 — Leonardo A100 64GB OOMs at 0.90+)
 #   EVAL_DAYTONA_THRESHOLD  (default: 3)
 #   EVAL_CONFIG_YAML        (default: dcagent_eval_config_no_override.yaml; resolved from hpc/harbor_yaml/eval/configs/)
 #   EVAL_AGENT_KWARGS       (default: "")     EVAL_AGENT_PARSER (default: "")
+#   EVAL_AGENT_NAME         (default: "terminus-2")
 #   EVAL_DB_JOB_ID          (optional, pre-created Pending job ID)
+#   EVAL_SKIP_UPLOAD        (optional, 1/true/yes for local-only smoke runs)
+#   EVAL_SKIP_DB_UPDATES     (optional; defaults to EVAL_SKIP_UPLOAD)
+#   EVAL_AUTO_STOP_INTERVAL_MINS
+#                           (optional Daytona sandbox idle-stop override)
 # ==============================================================================
 
 set -eo pipefail
@@ -44,6 +50,7 @@ RUN_TAG_ARG="${4:-}"
 
 # --- Read env vars from listener (with defaults) ---
 N_CONCURRENT="${EVAL_N_CONCURRENT:-64}"
+N_ATTEMPTS="${EVAL_N_ATTEMPTS:-3}"
 GPU_MEMORY_UTIL="${EVAL_GPU_MEMORY_UTIL:-0.85}"
 DAYTONA_ERROR_THRESHOLD="${EVAL_DAYTONA_THRESHOLD:-999999}"
 # Harbor config is listener/preset-driven via EVAL_CONFIG_YAML (resolved below,
@@ -55,6 +62,7 @@ DAYTONA_ERROR_THRESHOLD="${EVAL_DAYTONA_THRESHOLD:-999999}"
 CONFIG_YAML="${EVAL_CONFIG_YAML:-dcagent_eval_config_no_override.yaml}"
 AGENT_KWARGS="${EVAL_AGENT_KWARGS:-}"
 AGENT_PARSER="${EVAL_AGENT_PARSER:-}"
+AGENT_NAME="${EVAL_AGENT_NAME:-terminus-2}"
 DB_JOB_ID="${EVAL_DB_JOB_ID:-}"
 
 # Strip slashes and special chars for file-safe names
@@ -210,17 +218,23 @@ if [ -f "$DC_AGENT_SECRET_ENV" ]; then
     source "$DC_AGENT_SECRET_ENV"
 fi
 
-# --- Daytona API key for evals (3:1 weighted: 3/4 org2, 1/4 org1) ---
+# --- Daytona API key for evals -------------------------------------------------
+# DAYTONA_API_KEY is sufficient for a single eval org. DAYTONA_DATA_API_KEY is
+# optional overflow capacity; when it is present and genuinely different, spread
+# jobs 3:1 across the second and first orgs. If it is absent or duplicates the
+# primary key, stay on the primary org and do not pretend that capacity doubled.
 # Keys come from secrets.env (sourced above as $DC_AGENT_SECRET_ENV) — NEVER hardcode.
-# The two eval orgs are DAYTONA_API_KEY (org1) + DAYTONA_DATA_API_KEY (org2).
 DAYTONA_KEY_ORG1="${DAYTONA_API_KEY:?DAYTONA_API_KEY unset — source secrets.env ($DC_AGENT_SECRET_ENV) before launch}"
-DAYTONA_KEY_ORG2="${DAYTONA_DATA_API_KEY:?DAYTONA_DATA_API_KEY unset — source secrets.env ($DC_AGENT_SECRET_ENV) before launch}"
-if (( RANDOM % 4 == 0 )); then
+DAYTONA_KEY_ORG2="${DAYTONA_DATA_API_KEY:-$DAYTONA_KEY_ORG1}"
+if [ "$DAYTONA_KEY_ORG1" = "$DAYTONA_KEY_ORG2" ]; then
     export DAYTONA_API_KEY="$DAYTONA_KEY_ORG1"
-    echo "Selected Daytona org: org1 (${DAYTONA_API_KEY:0:12}...)"
+    echo "Selected Daytona org: primary/single (${DAYTONA_API_KEY:0:12}...)"
+elif (( RANDOM % 4 == 0 )); then
+    export DAYTONA_API_KEY="$DAYTONA_KEY_ORG1"
+    echo "Selected Daytona org: org1/primary (${DAYTONA_API_KEY:0:12}...)"
 else
     export DAYTONA_API_KEY="$DAYTONA_KEY_ORG2"
-    echo "Selected Daytona org: org2 (${DAYTONA_API_KEY:0:12}...)"
+    echo "Selected Daytona org: org2/overflow (${DAYTONA_API_KEY:0:12}...)"
 fi
 
 # --- vLLM / Triton / torch cache dirs (home quota is small; use WORK) ---
@@ -641,68 +655,101 @@ export BENCHMARK_NAME
 echo "Benchmark name: ${BENCHMARK_NAME:-<unresolved; uploader will derive from config.json>}"
 
 # ==============================================================================
-# Update DB: Started (using database/unified_db)
+# Update DB: Pending -> Started (using the listener's authoritative row ID)
 # ==============================================================================
-echo "Creating/updating DB job entry..."
 export MODEL REPO_ID RUN_TAG SLURM_JOB_ID BENCHMARK_NAME
 
 HARBOR_VERSION=$($PYTHON_BIN -c "import harbor; print(harbor.__version__)" 2>/dev/null || echo "unknown")
 export HARBOR_VERSION
 
-proxied $PYTHON_BIN - <<'PY' || true
-import os, sys
+_SKIP_DB_UPDATES=false
+case "${EVAL_SKIP_DB_UPDATES:-${EVAL_SKIP_UPLOAD:-0}}" in
+    1|true|TRUE|yes|YES) _SKIP_DB_UPDATES=true ;;
+esac
 
+if [ "$_SKIP_DB_UPDATES" = true ]; then
+    # Direct smoke submissions must not leave permanent Started rows that look
+    # like missing leaderboard evals. Listener-created production jobs keep the
+    # normal Pending -> Started lifecycle because EVAL_SKIP_UPLOAD is unset.
+    echo "Skipping DB updates for this local-only smoke run"
+    DB_JOB_ID=""
+else
+echo "Creating/updating DB job entry..."
+_db_update_rc=1
+if [ -n "$DB_JOB_ID" ]; then
+    echo "Updating Pending DB job $DB_JOB_ID -> Started (run_tag=$RUN_TAG)"
+    if proxied $PYTHON_BIN - <<'PY'; then
+import os
+from datetime import datetime, timezone
+
+from database.unified_db.utils import get_sandbox_job_by_id, update_sandbox_job
+
+db_job_id = os.environ["EVAL_DB_JOB_ID"]
+run_tag = os.environ["RUN_TAG"]
+existing = get_sandbox_job_by_id(db_job_id)
+if not existing:
+    raise RuntimeError(f"Pending DB job not found: {db_job_id}")
+if existing.get("job_status") == "Finished":
+    raise RuntimeError(f"Refusing to restart Finished DB job: {db_job_id}")
+
+agent_name = os.environ.get("EVAL_AGENT_NAME", "terminus-2")
+config = {
+    "agent": agent_name,
+    "env": "daytona",
+    "timeout_multiplier": float(os.environ.get("EVAL_TIMEOUT_MULTIPLIER", "1.0")),
+}
+result = update_sandbox_job(db_job_id, {
+    "job_name": run_tag,
+    "job_status": "Started",
+    "started_at": datetime.now(timezone.utc).isoformat(),
+    "slurm_job_id": os.environ["SLURM_JOB_ID"],
+    "n_trials": int(os.environ.get("EVAL_N_CONCURRENT", "64")),
+    "n_rep_eval": int(os.environ.get("EVAL_N_ATTEMPTS", "3")),
+    "config": config,
+    "package_version": os.environ.get("HARBOR_VERSION", "unknown"),
+})
+print(f"DB job updated with ID: {result['id']}")
+PY
+        _db_update_rc=0
+    else
+        _db_update_rc=$?
+        echo "WARNING: Pending DB update failed (rc=$_db_update_rc); falling back to a new Started row" >&2
+    fi
+fi
+
+if [ "$_db_update_rc" -ne 0 ]; then
+    # Backward compatibility for direct sbatch calls that do not originate from
+    # the listener and therefore have no pre-created Pending row.
+    DB_JOB_ID=$(proxied $PYTHON_BIN - <<'PY' || true
+import os, sys
 from database.unified_db.utils import create_job_entry_started
 
-model_hf = os.environ["MODEL"]
-dataset_hf = os.environ["REPO_ID"]
-run_tag = os.environ["RUN_TAG"]
-slurm_job_id = os.environ["SLURM_JOB_ID"]
-harbor_version = os.environ.get("HARBOR_VERSION", "unknown")
-
+agent_name = os.environ.get("EVAL_AGENT_NAME", "terminus-2")
 result = create_job_entry_started(
-    model_hf_name=model_hf,
-    benchmark_hf_name=dataset_hf,
-    job_name=run_tag,
+    model_hf_name=os.environ["MODEL"],
+    benchmark_hf_name=os.environ["REPO_ID"],
+    job_name=os.environ["RUN_TAG"],
     username=os.environ.get("USER", "leonardo"),
-    slurm_job_id=slurm_job_id,
-    harbor_package_version=harbor_version,
-    agent_name="terminus-2",
-    config={"agent": "terminus-2", "env": "daytona"},
-    n_trials=128,
-    n_rep_eval=3
+    slurm_job_id=os.environ["SLURM_JOB_ID"],
+    harbor_package_version=os.environ.get("HARBOR_VERSION", "unknown"),
+    agent_name=agent_name,
+    config={"agent": agent_name, "env": "daytona"},
+    n_trials=int(os.environ.get("EVAL_N_CONCURRENT", "64")),
+    n_rep_eval=int(os.environ.get("EVAL_N_ATTEMPTS", "3")),
 )
-
 if not result.get("success"):
     print(f"WARNING: DB create failed: {result.get('error')}", file=sys.stderr)
-    sys.exit(0)
-
-db_job_id = result["job"]["id"]
-print(f"DB job created with ID: {db_job_id}")
-PY
-
-# Get the DB job ID
-DB_JOB_ID=$(proxied $PYTHON_BIN - <<'PY' || true
-import os, sys
-
-from database.unified_db.utils import get_latest_job_for_model_benchmark
-
-model_hf = os.environ["MODEL"]
-dataset_hf = os.environ["REPO_ID"]
-
-try:
-    result = get_latest_job_for_model_benchmark(model_hf, dataset_hf)
-    if result and result.get("id"):
-        print(result["id"])
-except Exception as e:
-    print(f"WARNING: DB lookup failed: {e}", file=sys.stderr)
+else:
+    print(result["job"]["id"])
 PY
 )
+fi
 
 if [ -z "${DB_JOB_ID:-}" ]; then
     echo "WARNING: Failed to get DB job ID"
 else
     echo "DB job entry: $DB_JOB_ID"
+fi
 fi
 
 # ==============================================================================
@@ -733,6 +780,16 @@ fi
 if [ -n "${EVAL_AUTO_SNAPSHOT:-}" ]; then
     echo "Auto snapshot override: $EVAL_AUTO_SNAPSHOT"
     EXTRA_HARBOR_ARGS="$EXTRA_HARBOR_ARGS --environment-kwarg auto_snapshot=$EVAL_AUTO_SNAPSHOT"
+fi
+# Daytona's default idle-stop is five minutes. A sandbox is "idle" while the
+# model is generating its next action, so long-thinking checkpoints can have a
+# healthy live sandbox deleted mid-request. Keep this opt-in: short evals retain
+# Harbor's orphan-reaping default, while slow models can set a value longer than
+# their LLM request timeout (for example, 60 minutes vs. the 30-minute timeout
+# in dcagent_eval_config_no_override.yaml).
+if [ -n "${EVAL_AUTO_STOP_INTERVAL_MINS:-}" ]; then
+    echo "Daytona auto-stop interval override: ${EVAL_AUTO_STOP_INTERVAL_MINS} minutes"
+    EXTRA_HARBOR_ARGS="$EXTRA_HARBOR_ARGS --environment-kwarg auto_stop_interval_mins=$EVAL_AUTO_STOP_INTERVAL_MINS"
 fi
 # Agent kwargs + agent parser are listener-driven (mirror eval/jupiter/eval_harbor.sbatch),
 # replacing what the deprecated custom Leonardo config used to hardcode.
@@ -948,6 +1005,33 @@ if [ "$_NEEDS_TUNNEL" = true ]; then
     fi
 fi
 
+# OpenCode's YAML intentionally carries a placeholder because the served model
+# is only known at launch time. Unlike terminus-2, OpenCode derives its provider
+# from the `provider/model` prefix. Route it through Harbor's `vllm` provider so
+# it uses the OpenAI-compatible chat-completions endpoint and sends the exact
+# name vLLM serves. Leaving `openai/override-at-runtime` untouched makes OpenCode
+# call /v1/responses with model=override-at-runtime; vLLM returns 404 forever.
+if [ "$_CFG_AGENT_NAME" = "opencode" ]; then
+    _OPENCODE_RUNTIME_CONFIG="$RUN_DIR/harbor_config_opencode_runtime.yaml"
+    "$PYTHON_BIN" - "$HARBOR_CONFIG" "$_OPENCODE_RUNTIME_CONFIG" "$SERVED_MODEL" <<'PY'
+import sys
+import yaml
+
+source_path, output_path, served_model = sys.argv[1:]
+with open(source_path) as f:
+    config = yaml.safe_load(f) or {}
+agents = config.get("agents") or []
+if not agents or agents[0].get("name") != "opencode":
+    raise RuntimeError(f"Expected opencode as first agent in {source_path}")
+agents[0]["model_name"] = f"vllm/{served_model}"
+with open(output_path, "w") as f:
+    yaml.safe_dump(config, f, sort_keys=False)
+print(f"[opencode-routing] model_name -> vllm/{served_model}")
+PY
+    HARBOR_CONFIG="$_OPENCODE_RUNTIME_CONFIG"
+    echo "[opencode-routing] Runtime config: $HARBOR_CONFIG"
+fi
+
 # Check if a previous job dir exists for this run tag (for resume)
 if [ -d "$RUN_DIR" ] && [ -f "$RUN_DIR/config.json" ]; then
     echo "Found existing job dir, resuming: $RUN_DIR"
@@ -961,9 +1045,9 @@ if [ -d "$RUN_DIR" ] && [ -f "$RUN_DIR/config.json" ]; then
     # live node. (Local file op — no proxychains needed. TACC parity, 2026-06-28.)
     NEW_API_BASE="http://${MASTER_ADDR}:8000/v1"
     echo "Refreshing config.json api_base -> $NEW_API_BASE"
-    $PYTHON_BIN - "$RUN_DIR/config.json" "$NEW_API_BASE" <<'PY'
+    $PYTHON_BIN - "$RUN_DIR/config.json" "$NEW_API_BASE" "$SERVED_MODEL" <<'PY'
 import json, sys
-cfg_path, new_api_base = sys.argv[1], sys.argv[2]
+cfg_path, new_api_base, served_model = sys.argv[1:]
 with open(cfg_path) as f:
     cfg = json.load(f)
 changed = False
@@ -973,6 +1057,12 @@ for agent in cfg.get("agents", []):
         print(f"  agent api_base {kw.get('api_base')!r} -> {new_api_base!r}")
         kw["api_base"] = new_api_base
         changed = True
+    if agent.get("name") == "opencode":
+        model_name = f"vllm/{served_model}"
+        if agent.get("model_name") != model_name:
+            print(f"  opencode model_name {agent.get('model_name')!r} -> {model_name!r}")
+            agent["model_name"] = model_name
+            changed = True
 if changed:
     with open(cfg_path, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -1052,6 +1142,8 @@ mkdir -p "$RUN_DIR"
     echo "BENCHMARK_ID=${BENCHMARK_ID:-}"
     echo "N_CONCURRENT=$N_CONCURRENT"
     echo "GPU_MEMORY_UTIL=$GPU_MEMORY_UTIL"
+    echo "EVAL_SKIP_UPLOAD=${EVAL_SKIP_UPLOAD:-0}"
+    echo "EVAL_AUTO_STOP_INTERVAL_MINS=${EVAL_AUTO_STOP_INTERVAL_MINS:-}"
 } > "$RUN_DIR/meta.env"
 
 # Harbor writes trials, result.json, and config.json directly to RUN_DIR
@@ -1068,6 +1160,17 @@ if [ ! -d "$RUN_DIR" ]; then
     echo "Expected run directory not found: $RUN_DIR"
     exit 2
 fi
+
+# Smoke subsets are useful for validating model/harness compatibility, but they
+# must never be registered as full-benchmark leaderboard results. The listener
+# can still create a Pending/Started observability row; this switch prevents the
+# post-run HF/DB uploader from marking it Finished with subset metrics.
+case "${EVAL_SKIP_UPLOAD:-0}" in
+    1|true|TRUE|yes|YES)
+        echo "EVAL_SKIP_UPLOAD=${EVAL_SKIP_UPLOAD}: preserving local results and skipping HF/DB upload"
+        exit 0
+        ;;
+esac
 
 # ==============================================================================
 # Check for DaytonaErrors before upload
