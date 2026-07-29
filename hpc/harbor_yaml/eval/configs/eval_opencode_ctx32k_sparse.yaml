@@ -53,7 +53,7 @@ verifier:
 agents:
 - name: opencode
   import_path: null
-  model_name: vllm/laion/qwen3-30b-a3b-thinking-opencode-sft-densemixer-serveparity
+  model_name: vllm/laion/qwen3-30b-a3b-thinking-opencode-sft-sparse-serveparity
   max_timeout_sec: null
   override_setup_timeout_sec: 600
   kwargs:
