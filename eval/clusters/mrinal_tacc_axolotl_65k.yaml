@@ -31,8 +31,17 @@
 #
 # USAGE
 #   --baseline-model-configs eval/clusters/mrinal_tacc_axolotl_65k.yaml
-# plus, on the listener invocation:
-#   EVAL_TIMEOUT_MULTIPLIER=2.0   (the "32B" name otherwise size-infers to 16.0)
+#   --gpu-memory-util 0.95
+#
+# timeout_multiplier is pinned BELOW rather than passed as EVAL_TIMEOUT_MULTIPLIER: the
+# listener's precedence is CLI > per-model baseline > size-inferred > 1.0, and the env
+# var is not in that chain, so a bare EVAL_TIMEOUT_MULTIPLIER=2.0 silently loses to the
+# size-inference, which maps the "32B" in this model's name to 16.0 (verified in a dry
+# run: "Per-model timeout_multiplier ...: 16.0"). Same trap as Leonardo.
+#
+# gpu-memory-utilization is passed as the listener's --gpu-memory-util flag, NOT in
+# extra_args: the sbatch already emits its own --gpu-memory-utilization, and two copies
+# of the same vLLM flag is ambiguous.
 #
 # NOT set here on purpose:
 #   * tool_call_parser  — terminus-2 is prompt-based JSON and does not use vLLM
@@ -47,7 +56,8 @@ models:
     max_model_len: 65536
     swap_space: 32
     trust_remote_code: true
-    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8 --gpu-memory-utilization 0.95"
+    timeout_multiplier: 2.0
+    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8"
 
 # Fallback for any other 32B-class checkpoint evaluated on Vista. Same reasoning as
 # above; kept in sync with the entry above so a sibling model does not silently get
@@ -58,7 +68,8 @@ patterns:
     tensor_parallel_size: 1
     max_model_len: 65536
     swap_space: 32
-    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8 --gpu-memory-utilization 0.95"
+    timeout_multiplier: 2.0
+    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8"
 
   - match: ".*"
     trust_remote_code: true
