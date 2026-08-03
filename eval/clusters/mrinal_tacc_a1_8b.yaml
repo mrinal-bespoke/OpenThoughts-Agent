@@ -1,0 +1,81 @@
+# Per-model TACC/Vista (GH200) serve config — a1 8B flawed_summ re-evals.
+#
+# WHY A SEPARATE CONFIG FROM THE 32B ONE
+# --------------------------------------
+# eval/clusters/mrinal_tacc_axolotl_65k.yaml exists to force a 32B up to 65k with YaRN.
+# None of that applies here, and copying it would be actively wrong:
+#
+#   * The a1 family is Qwen3-8B (layers=36, hidden=4096, kv_heads=8, head_dim=128),
+#     NOT 32B. Verified from HF config.json for a1-nemotron_csharp / a1-stack_dockerfile
+#     / a1-nl2bash.
+#   * Native max_position_embeddings is 40960, so max_model_len: 40960 needs NO rope
+#     scaling at all. No hf_overrides, no YaRN factor, nothing to get wrong.
+#   * KV is not scarce here, so no fp8 KV cache — fp16 KV keeps the scored eval free of
+#     any quantisation question. (The 32B config needs fp8 purely to fit.)
+#
+# CONCURRENCY — the point of this file
+# ------------------------------------
+# eval/tacc/eval_harbor.sbatch clamps concurrency to TACC_N_CONCURRENT_CEILING, default
+# 8. That default is CORRECT for a 32B and WRONG here. Its committed rationale
+# (2026-07-16) is explicit that it was measured on 32B legs: "a single GH200 serving the
+# 32B at TP=1 saturates at ~4-5 concurrent in-flight generations". The ceiling is a
+# property of weights-vs-KV, not of the cluster.
+#
+# Same GH200 (96GB, util 0.95 -> ~91GB usable):
+#
+#   |                     | 32B (set the ceiling) | a1 8B (this file) |
+#   | weights             | 61 GB                 | ~16 GB            |
+#   | KV budget           | ~30 GB                | ~75 GB            |
+#   | KV/token (fp16)     | 256 KB                | 144 KB            |
+#   | full-len concurrent | 3.15 @ 65k            | ~13 @ 40960       |
+#
+# KV/token = layers(36) x kv_heads(8) x head_dim(128) x 2(K+V) x 2B = 144 KB.
+# ~75GB / 144KB = ~546k tokens of KV; at 40960/seq that is ~13 concurrent AT FULL
+# LENGTH, and real trials sit well below max context, so effective concurrency is
+# higher still.
+#
+# So launch this with the ceiling raised — it is the documented per-run override:
+#
+#   EVAL_TACC_N_CONCURRENT_CEILING=32 ... --n-concurrent 32
+#
+# Measured baseline to beat: the 32B leg (job 886404) managed 7.7 trials/h at
+# n_concurrent=8, against a 31.5 trials/h median across 32 historical tb2 runs. Median
+# per-trial wall time was 30.2 min, so 32 concurrent should land near 60 trials/h ->
+# a full 267-trial tb2 leg in roughly 4-5h instead of 33h.
+#
+# IF THE VNC STORM COMES BACK
+# ---------------------------
+# The original ceiling existed because too many simultaneous Daytona create_sandbox
+# calls caused EnvironmentStartTimeoutError -> VerificationNotCompletedError with 0
+# reward. That failure is env-build contention, NOT GPU saturation, so it is still
+# possible at 32 even though the GPU can feed it. Watch:
+#   grep -c "EnvironmentStartTimeoutError\|VerificationNotCompletedError" <run>/*/result*.json
+# >~10% of attempted trials = back off to 16. Do not confuse it with benign
+# AgentTimeoutError, which does not count against the gate.
+
+models:
+  # a1 flawed_summ re-eval cohort (Qwen3-8B). Listed explicitly rather than by pattern
+  # so a 32B sibling can never silently inherit 8B-shaped concurrency assumptions.
+  "DCAgent/a1-qasper": &a1_8b
+    tensor_parallel_size: 1
+    max_model_len: 40960
+    swap_space: 32
+    trust_remote_code: true
+    timeout_multiplier: 2.0
+    extra_args: "--enable-prefix-caching"
+
+  "DCAgent/a1-softwareheritage": *a1_8b
+  "DCAgent/a1-stack_selfdoc": *a1_8b
+  "DCAgent/a1-stack_selfdoc_gpt5mini": *a1_8b
+
+patterns:
+  # Any other a1-* model: same 8B shape. Kept narrow on purpose — this pattern must not
+  # catch 32B checkpoints, whose serve profile is completely different (see the table
+  # above and mrinal_tacc_axolotl_65k.yaml).
+  - match: "(?i)/a1-"
+    tensor_parallel_size: 1
+    max_model_len: 40960
+    swap_space: 32
+    trust_remote_code: true
+    timeout_multiplier: 2.0
+    extra_args: "--enable-prefix-caching"

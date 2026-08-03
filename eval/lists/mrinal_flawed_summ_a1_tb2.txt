@@ -1,0 +1,4 @@
+DCAgent/a1-qasper
+DCAgent/a1-softwareheritage
+DCAgent/a1-stack_selfdoc
+DCAgent/a1-stack_selfdoc_gpt5mini
