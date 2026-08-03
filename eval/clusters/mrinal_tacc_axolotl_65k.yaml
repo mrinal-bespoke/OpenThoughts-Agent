@@ -1,0 +1,67 @@
+# Per-model TACC/Vista (GH200) serve config — 65k context.
+#
+# WHY THIS EXISTS
+# ---------------
+# The shared TACC baseline (eval/clusters/tacc_baseline_model_configs.yaml) and the
+# gh200 registry entry both pin max_model_len: 32768. At 32k the terminus-2 proactive
+# summarizer overflows the window: the summary request itself exceeds the context, vLLM
+# returns 400, harbor retries at 4096 -> 2048 -> 1024, and the trial stalls.
+#
+# Measured on THIS cluster, run
+#   $SCRATCH/eval_jobs/terminal_bench_2_..._axolotl_step250_20260723_175741
+#   -> 5166 vLLM 400s, ALL of them "maximum context length is 32768"
+#   -> 6 of 267 trials completed in ~31h (260 still pending at kill)
+# Identical signature to Leonardo, where 32k produced 3050-5676 such 400s per run and
+# 65k produced ZERO. See RECOVERY-LOG.md section 9.
+#
+# MEMORY BUDGET (why the extra flags are load-bearing)
+# ---------------------------------------------------
+# Vista is 1x GH200 96GB per node, so TP=1 — no sharding to spread the weights over.
+# Qwen3-32B bf16 is ~65GB of weights, leaving ~30GB for the KV cache at util 0.95.
+# Qwen3-32B KV is 64 layers x 8 kv-heads x 128 head-dim x 2 (K+V):
+#   fp16 -> 256KB/token -> 16.8GB per 65k sequence  (only ~1.8 concurrent seqs: too tight)
+#   fp8  -> 128KB/token ->  8.4GB per 65k sequence  (~3.5 concurrent seqs: workable)
+# So --kv-cache-dtype fp8 is REQUIRED to reach 65k here, not an optimisation. It is
+# already what the gh200 registry entry for this model uses, so this is not a new
+# quantisation choice — only the context length changes.
+#
+# If vLLM still fails to allocate at startup, drop max_model_len to 49152 (48k) before
+# touching anything else: 48k still clears the observed 28673-input + 4096-output
+# overflow with headroom, and costs ~2.6GB less KV per sequence.
+#
+# USAGE
+#   --baseline-model-configs eval/clusters/mrinal_tacc_axolotl_65k.yaml
+# plus, on the listener invocation:
+#   EVAL_TIMEOUT_MULTIPLIER=2.0   (the "32B" name otherwise size-infers to 16.0)
+#
+# NOT set here on purpose:
+#   * tool_call_parser  — terminus-2 is prompt-based JSON and does not use vLLM
+#     tool-calling. It is only needed for installed agents (opencode).
+#   * hf_overrides/YaRN — Qwen3-32B is natively 40960, so 65536 needs rope scaling ONLY
+#     if vLLM refuses the derived max length. It accepted 65536 on Leonardo for this
+#     checkpoint; if it errors with "max_model_len > derived", see RECOVERY-LOG.md s10.
+
+models:
+  "laion/Qwen3-32B-OpenThoughts-Agent-SFT-10K-axolotl-step250":
+    tensor_parallel_size: 1
+    max_model_len: 65536
+    swap_space: 32
+    trust_remote_code: true
+    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8 --gpu-memory-utilization 0.95"
+
+# Fallback for any other 32B-class checkpoint evaluated on Vista. Same reasoning as
+# above; kept in sync with the entry above so a sibling model does not silently get
+# the broken 32k default.
+patterns:
+  - match: "(?i)32[Bb]"
+    trust_remote_code: true
+    tensor_parallel_size: 1
+    max_model_len: 65536
+    swap_space: 32
+    extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8 --gpu-memory-utilization 0.95"
+
+  - match: ".*"
+    trust_remote_code: true
+    tensor_parallel_size: 1
+    max_model_len: 65536
+    extra_args: "--enable-prefix-caching"
