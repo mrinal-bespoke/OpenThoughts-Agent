@@ -57,16 +57,38 @@ models:
     swap_space: 32
     trust_remote_code: true
     timeout_multiplier: 2.0
+    # YaRN. Qwen3-32B is natively max_position_embeddings=40960, so a bare
+    # max_model_len: 65536 is REJECTED at startup:
+    #   "User-specified max_model_len (65536) is greater than the derived
+    #    max_model_len (max_position_embeddings=40960.0 ...)"   [job 886384]
+    # factor = 65536 / 40960 = 1.6.
+    # max_position_embeddings is overridden as well as rope_scaling because vLLM does
+    # not apply the YaRN factor when deriving the max length — without it the derived
+    # value stays 40960 and the same error fires. Must be a JSON STRING, not a YAML map.
+    # NOT VLLM_ALLOW_LONG_MAX_MODEL_LEN=1: that permits long positions with NO scaling,
+    # which gives NaN on a RoPE model. See RECOVERY-LOG.md section 10.
+    hf_overrides: '{"max_position_embeddings":65536,"rope_scaling":{"rope_type":"yarn","factor":1.6,"original_max_position_embeddings":40960}}'
     extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8"
 
-# Fallback for any other 32B-class checkpoint evaluated on Vista. Same reasoning as
-# above; kept in sync with the entry above so a sibling model does not silently get
-# the broken 32k default.
+# Fallback for any OTHER checkpoint evaluated on Vista.
+#
+# These deliberately do NOT copy the 65536 + YaRN block above. The factor 1.6 is derived
+# from Qwen3-32B's native 40960; applied blindly to a model with a different native
+# context it would either be rejected at startup or, worse, silently mis-scale RoPE. A
+# pattern match is by definition a model we have not looked at.
+#
+# So the patterns take the largest context that needs NO rope scaling on a Qwen3-class
+# checkpoint — 40960, the native window. That is still 25% more headroom than the 32768
+# default that produced the overflow storm, and it always starts.
+#
+# It is NOT a substitute for a real per-model entry: 40960 was not shown to drive the
+# summarizer 400s to zero (65536 was, on Leonardo). Any model we actually care about
+# should get an explicit entry above with its own correctly-derived YaRN factor.
 patterns:
   - match: "(?i)32[Bb]"
     trust_remote_code: true
     tensor_parallel_size: 1
-    max_model_len: 65536
+    max_model_len: 40960
     swap_space: 32
     timeout_multiplier: 2.0
     extra_args: "--enable-prefix-caching --dtype bfloat16 --kv-cache-dtype fp8"
@@ -74,5 +96,5 @@ patterns:
   - match: ".*"
     trust_remote_code: true
     tensor_parallel_size: 1
-    max_model_len: 65536
+    max_model_len: 32768
     extra_args: "--enable-prefix-caching"
