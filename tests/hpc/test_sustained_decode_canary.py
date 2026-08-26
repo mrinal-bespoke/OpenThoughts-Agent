@@ -436,7 +436,7 @@ def test_wrapper_canary_mode_is_default_off_and_isolated_from_policy_eval():
     assert 'RUN_KIND=canary' in source
     assert 'RUN_EVAL=0 and RUN_AGENTIC=0' in source
     assert 'sustained_decode_canary.py' in source
-    assert 'eval and canary jobs must explicitly pin MODEL_REPO and MODEL_REVISION' in source
+    assert "must explicitly pin MODEL_REPO and MODEL_REVISION" in source
     assert 'MAX_MODEL_LEN must fit CANARY_DEPTH_TOKENS' in source
     assert 'CANARY_CONTEXT_MARGIN="${CANARY_CONTEXT_MARGIN:-512}"' in source
     assert 'CANARY_HARD_TIMEOUT="${CANARY_HARD_TIMEOUT:-6000}"' in source

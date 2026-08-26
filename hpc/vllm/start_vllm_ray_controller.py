@@ -63,7 +63,7 @@ def _release_torch_memory() -> None:
         pass
 
 
-def _discover_cli_flags() -> set[str]:
+def _discover_cli_flags() -> set[str] | None:
     cmd = [sys.executable, "-m", "vllm.entrypoints.openai.api_server", "--help"]
     try:
         # vllm-tpu's --help import path triggers libtpu/XLA bring-up which can
@@ -76,7 +76,10 @@ def _discover_cli_flags() -> set[str]:
             "falling back to assume-supported for all flags we emit.",
             flush=True,
         )
-        return set()
+        # Preserve the distinction between a successful probe and a probe that
+        # could not answer. Callers must assume supported on discovery failure;
+        # otherwise required topology flags can be silently dropped.
+        return None
 
     flags = set(_CLI_FLAG_PATTERN.findall(result.stdout or ""))
     flags.update(_CLI_FLAG_PATTERN.findall(result.stderr or ""))
@@ -84,7 +87,7 @@ def _discover_cli_flags() -> set[str]:
 
 
 @functools.lru_cache(maxsize=1)
-def _supported_flags() -> set[str]:
+def _supported_flags() -> set[str] | None:
     # ``VLLM_SKIP_FLAG_DISCOVERY=1`` short-circuits the ``vllm --help`` probe.
     # The iris+TPU path sets this because importing vllm-tpu cold-bootstraps
     # libtpu inside a subprocess.run, which can hang for >5 min on the first
@@ -128,7 +131,30 @@ def _flag_supported(flag: str) -> bool:
     if os.environ.get("VLLM_SKIP_FLAG_DISCOVERY") == "1":
         # Assume yes for everything else.
         return True
-    return flag in _supported_flags()
+    supported = _supported_flags()
+    if supported is None:
+        # A timed-out/broken help probe is not evidence that a flag is absent.
+        # Fail open here so required CUDA topology flags reach vLLM, which can
+        # then reject an actually unsupported flag with an explicit error.
+        return True
+    return flag in supported
+
+
+def _flag_explicitly_supported(flag: str) -> bool:
+    """Return true only when CLI discovery positively identifies ``flag``.
+
+    Most topology flags must fail open when discovery times out, because
+    silently dropping them changes the requested parallel geometry.  Flags
+    with a complete environment-variable replacement must instead fail
+    closed: forwarding an unsupported flag makes argparse terminate before
+    model loading.  ``--ray-address`` is currently the only such flag.
+    """
+    if _is_tpu_env() and flag in _TPU_UNSUPPORTED_API_SERVER_FLAGS:
+        return False
+    if os.environ.get("VLLM_SKIP_FLAG_DISCOVERY") == "1":
+        return False
+    supported = _supported_flags()
+    return supported is not None and flag in supported
 
 
 def _append_flag(cmd: List[str], flag: str, value: str | None = None) -> None:
@@ -183,14 +209,13 @@ def build_vllm_command(args: argparse.Namespace, extra_args: List[str]) -> List[
                 file=sys.stderr,
             )
 
-    # Ray address: vllm-tpu 0.20.0 dropped the --ray-address CLI flag — the
-    # entrypoint only accepts RAY_ADDRESS via env var. Caller must set the
-    # env var BEFORE invoking subprocess.Popen; see main() below.
+    # Ray address: current vLLM entrypoints accept RAY_ADDRESS via the
+    # environment, while some older builds also accepted --ray-address.  Only
+    # forward the CLI form after a positive discovery result.  Unlike required
+    # topology flags, discovery failure must not fail open here: doing so makes
+    # argparse terminate before model loading on current CUDA and TPU builds.
     if args.ray_address:
-        if os.environ.get("VLLM_SKIP_FLAG_DISCOVERY") == "1":
-            # main() has already mirrored args.ray_address into env["RAY_ADDRESS"].
-            pass
-        elif _flag_supported("--ray-address"):
+        if _flag_explicitly_supported("--ray-address"):
             _append_flag(cmd, "--ray-address", args.ray_address)
         else:
             print(
@@ -275,20 +300,24 @@ def parse_args() -> tuple[argparse.Namespace, List[str]]:
     return args, extra_args
 
 
+def build_subprocess_env(args: argparse.Namespace) -> dict[str, str]:
+    """Build the child environment, including the Ray rendezvous address."""
+    env = os.environ.copy()
+    if args.verbose:
+        env.setdefault("VLLM_LOG_LEVEL", "INFO")
+    if args.ray_address:
+        env["RAY_ADDRESS"] = args.ray_address
+    return env
+
+
 def main() -> None:
     args, extra_args = parse_args()
     _release_torch_memory()
 
-    env = os.environ.copy()
-    if args.verbose:
-        env.setdefault("VLLM_LOG_LEVEL", "INFO")
-
-    # Mirror --ray-address into RAY_ADDRESS env so vllm-tpu (which dropped
-    # the CLI flag in 0.20.0) and modern CUDA vllm (which honors the env)
-    # both pick it up. Must happen before build_vllm_command() so the env
-    # we hand to subprocess.Popen has it.
-    if args.ray_address and os.environ.get("VLLM_SKIP_FLAG_DISCOVERY") == "1":
-        env["RAY_ADDRESS"] = args.ray_address
+    # Mirror the controller argument into the child environment on every
+    # platform. This is the supported rendezvous transport when api_server
+    # omits the legacy --ray-address CLI flag.
+    env = build_subprocess_env(args)
 
     # Strip extra_args that aren't accepted by vllm-tpu 0.20.0 when the
     # iris/TPU shortcut is in effect. ``--swap-space 0`` is the prime
