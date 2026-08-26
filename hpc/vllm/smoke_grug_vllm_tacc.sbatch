@@ -43,16 +43,40 @@ ASYNC_SCHEDULING="${ASYNC_SCHEDULING:-auto}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-4096}"
 RUN_EVAL="${RUN_EVAL:-0}"
 RUN_AGENTIC="${RUN_AGENTIC:-0}"
+RUN_CANARY="${RUN_CANARY:-0}"
+CANARY_CONCURRENCY="${CANARY_CONCURRENCY:-4}"
+CANARY_CALIBRATION_TOKENS="${CANARY_CALIBRATION_TOKENS:-512}"
+CANARY_SUSTAINED_TOKENS="${CANARY_SUSTAINED_TOKENS:-4096}"
+CANARY_DEPTH_TOKENS="${CANARY_DEPTH_TOKENS:-16384}"
+CANARY_MIN_DEPTH_TOKENS="${CANARY_MIN_DEPTH_TOKENS:-8192}"
+CANARY_CONTEXT_MARGIN="${CANARY_CONTEXT_MARGIN:-512}"
+CANARY_METRICS_INTERVAL="${CANARY_METRICS_INTERVAL:-30}"
+CANARY_STALL_TIMEOUT="${CANARY_STALL_TIMEOUT:-600}"
+CANARY_UNHEALTHY_WINDOW="${CANARY_UNHEALTHY_WINDOW:-300}"
+CANARY_MAX_FAILURE_RATE="${CANARY_MAX_FAILURE_RATE:-0.05}"
+CANARY_MIN_HEALTH_FAILURES="${CANARY_MIN_HEALTH_FAILURES:-2}"
+CANARY_HARD_TIMEOUT="${CANARY_HARD_TIMEOUT:-6000}"
+CANARY_REQUEST_TIMEOUT="${CANARY_REQUEST_TIMEOUT:-900}"
+CANARY_TIMEOUT_MULTIPLIER="${CANARY_TIMEOUT_MULTIPLIER:-1.0}"
+CANARY_MIN_DURATION="${CANARY_MIN_DURATION:-2700}"
+CANARY_SUSTAINED_SECONDS="${CANARY_SUSTAINED_SECONDS:-2400}"
 ENABLE_THINKING="${ENABLE_THINKING:-0}"
-if [ "$RUN_AGENTIC" = "1" ]; then
+if [ "$RUN_CANARY" = "1" ] && { [ "$RUN_EVAL" != "0" ] || [ "$RUN_AGENTIC" != "0" ]; }; then
+  echo "FATAL: RUN_CANARY=1 requires RUN_EVAL=0 and RUN_AGENTIC=0" >&2
+  exit 2
+fi
+if [ "$RUN_CANARY" = "1" ]; then
+  RUN_KIND=canary
+elif [ "$RUN_AGENTIC" = "1" ]; then
   RUN_KIND=agentic
 elif [ "$RUN_EVAL" = "1" ]; then
   RUN_KIND=eval
 else
   RUN_KIND=smoke
 fi
-if [ "$RUN_EVAL" = "1" ] && { [ -z "$MODEL_REPO_EXPLICIT" ] || [ -z "$MODEL_REVISION_EXPLICIT" ]; }; then
-  echo "FATAL: eval jobs must explicitly pin MODEL_REPO and MODEL_REVISION" >&2
+if { [ "$RUN_EVAL" = "1" ] || [ "$RUN_CANARY" = "1" ]; } \
+  && { [ -z "$MODEL_REPO_EXPLICIT" ] || [ -z "$MODEL_REVISION_EXPLICIT" ]; }; then
+  echo "FATAL: eval and canary jobs must explicitly pin MODEL_REPO and MODEL_REVISION" >&2
   exit 2
 fi
 # RUN_DIR is overridable so a retry can reuse ONE result root. Derived from
@@ -191,6 +215,93 @@ if ! [[ "$EVAL_NUM_CONCURRENT" =~ ^[1-9][0-9]*$ ]]; then
   echo "FATAL: EVAL_NUM_CONCURRENT must be a positive integer" >&2
   exit 2
 fi
+if ! [[ "$CANARY_CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FATAL: CANARY_CONCURRENCY must be a positive integer" >&2
+  exit 2
+fi
+if ! [[ "$MAX_NUM_SEQS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FATAL: MAX_NUM_SEQS must be a positive integer" >&2
+  exit 2
+fi
+for canary_value in \
+  "$CANARY_CALIBRATION_TOKENS" \
+  "$CANARY_SUSTAINED_TOKENS" \
+  "$CANARY_DEPTH_TOKENS" \
+  "$CANARY_MIN_DEPTH_TOKENS" \
+  "$CANARY_CONTEXT_MARGIN"; do
+  if ! [[ "$canary_value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "FATAL: canary token sizes and context margin must be positive integers" >&2
+    exit 2
+  fi
+done
+if [ "$RUN_CANARY" = "1" ]; then
+  "$PYTHON" - \
+    "$CANARY_METRICS_INTERVAL" \
+    "$CANARY_STALL_TIMEOUT" \
+    "$CANARY_UNHEALTHY_WINDOW" \
+    "$CANARY_MAX_FAILURE_RATE" \
+    "$CANARY_MIN_HEALTH_FAILURES" \
+    "$CANARY_HARD_TIMEOUT" \
+    "$CANARY_REQUEST_TIMEOUT" \
+    "$CANARY_TIMEOUT_MULTIPLIER" \
+    "$CANARY_MIN_DURATION" \
+    "$CANARY_SUSTAINED_SECONDS" <<'PYEOF'
+import math
+import sys
+
+(
+    metrics_interval,
+    stall_timeout,
+    unhealthy_window,
+    max_failure_rate,
+    min_health_failures,
+    hard_timeout,
+    request_timeout,
+    timeout_multiplier,
+    min_duration,
+    sustained_seconds,
+) = sys.argv[1:]
+positive_floats = {
+    "CANARY_METRICS_INTERVAL": metrics_interval,
+    "CANARY_STALL_TIMEOUT": stall_timeout,
+    "CANARY_UNHEALTHY_WINDOW": unhealthy_window,
+    "CANARY_HARD_TIMEOUT": hard_timeout,
+    "CANARY_REQUEST_TIMEOUT": request_timeout,
+    "CANARY_MIN_DURATION": min_duration,
+    "CANARY_SUSTAINED_SECONDS": sustained_seconds,
+}
+for name, raw_value in positive_floats.items():
+    try:
+        value = float(raw_value)
+    except ValueError:
+        raise SystemExit(f"FATAL: {name} must be numeric") from None
+    if not math.isfinite(value) or value <= 0:
+        raise SystemExit(f"FATAL: {name} must be finite and positive")
+try:
+    failure_rate = float(max_failure_rate)
+except ValueError:
+    raise SystemExit("FATAL: CANARY_MAX_FAILURE_RATE must be numeric") from None
+if not math.isfinite(failure_rate) or not 0 < failure_rate <= 1:
+    raise SystemExit("FATAL: CANARY_MAX_FAILURE_RATE must be in (0, 1]")
+try:
+    multiplier = float(timeout_multiplier)
+except ValueError:
+    raise SystemExit("FATAL: CANARY_TIMEOUT_MULTIPLIER must be numeric") from None
+if not math.isfinite(multiplier) or multiplier < 1:
+    raise SystemExit("FATAL: CANARY_TIMEOUT_MULTIPLIER must be at least 1")
+if not min_health_failures.isdigit() or int(min_health_failures) <= 0:
+    raise SystemExit("FATAL: CANARY_MIN_HEALTH_FAILURES must be a positive integer")
+PYEOF
+fi
+if [ "$RUN_CANARY" = "1" ] && [ "$MAX_NUM_SEQS" -ne "$CANARY_CONCURRENCY" ]; then
+  echo "FATAL: sustained canary requires MAX_NUM_SEQS == CANARY_CONCURRENCY" >&2
+  exit 2
+fi
+if [ "$RUN_CANARY" = "1" ] \
+  && [ "$MAX_MODEL_LEN" -lt "$((CANARY_DEPTH_TOKENS + CANARY_CONTEXT_MARGIN))" ]; then
+  echo "FATAL: MAX_MODEL_LEN must fit CANARY_DEPTH_TOKENS plus CANARY_CONTEXT_MARGIN" >&2
+  exit 2
+fi
 if [ -n "$EVAL_LIMIT" ] && ! [[ "$EVAL_LIMIT" =~ ^[1-9][0-9]*$ ]]; then
   echo "FATAL: EVAL_LIMIT must be empty or a positive integer" >&2
   exit 2
@@ -246,9 +357,11 @@ if [ "$RUN_EVAL" = "1" ]; then
     --setting "EVAL_ROOT=${EVAL_ROOT_OVERRIDE:-$RUN_DIR/results}"
     --setting "EVAL_RESUME_MODE=$EVAL_RESUME_MODE"
     --setting "EVAL_LIMIT=${EVAL_LIMIT:-<unset>}"
+    --setting "RUN_KIND=$RUN_KIND"
     --setting "MAX_MODEL_LEN=$MAX_MODEL_LEN"
     --setting "EVAL_MAX_LENGTH=$EVAL_MAX_LENGTH"
     --setting "MAX_NUM_SEQS=$MAX_NUM_SEQS"
+    --setting "MAX_NUM_BATCHED_TOKENS=$MAX_NUM_BATCHED_TOKENS"
     --setting "EVAL_NUM_CONCURRENT=$EVAL_NUM_CONCURRENT"
     --setting "TENSOR_PARALLEL_SIZE=$TENSOR_PARALLEL_SIZE"
     --setting "PIPELINE_PARALLEL_SIZE=$PIPELINE_PARALLEL_SIZE"
@@ -421,6 +534,145 @@ if [ -n "$VLLM_PYTHON_OVERLAY" ]; then
     --expected-size "$DATA_PARALLEL_SIZE" \
     --vllm-pid "$VLLM_PID" \
     --timeout-sec 60
+fi
+
+if [ "$RUN_CANARY" = "1" ]; then
+  test -f "$REPO_ROOT/hpc/vllm/sustained_decode_canary.py"
+  "$PYTHON" - \
+    "$RUN_DIR/canary-manifest.json" \
+    "${BASH_SOURCE[0]}" \
+    "$REPO_ROOT/hpc/vllm/sustained_decode_canary.py" \
+    "$MODEL_REPO" \
+    "$MODEL_REVISION" \
+    "$MODEL_PATH" \
+    "$TENSOR_PARALLEL_SIZE" \
+    "$PIPELINE_PARALLEL_SIZE" \
+    "$DATA_PARALLEL_SIZE" \
+    "$ENABLE_EXPERT_PARALLEL" \
+    "$MAX_MODEL_LEN" \
+    "$MAX_NUM_SEQS" \
+    "$MAX_NUM_BATCHED_TOKENS" \
+    "$ASYNC_SCHEDULING" \
+    "$ENABLE_THINKING" \
+    "$VLLM_PYTHON_OVERLAY" \
+    "${SLURM_JOB_ID:-<unset>}" \
+    "$RUN_DIR" \
+    "$CANARY_CONCURRENCY" \
+    "$CANARY_CALIBRATION_TOKENS" \
+    "$CANARY_SUSTAINED_TOKENS" \
+    "$CANARY_DEPTH_TOKENS" \
+    "$CANARY_MIN_DEPTH_TOKENS" \
+    "$CANARY_METRICS_INTERVAL" \
+    "$CANARY_STALL_TIMEOUT" \
+    "$CANARY_UNHEALTHY_WINDOW" \
+    "$CANARY_MAX_FAILURE_RATE" \
+    "$CANARY_MIN_HEALTH_FAILURES" \
+    "$CANARY_HARD_TIMEOUT" \
+    "$CANARY_REQUEST_TIMEOUT" \
+    "$CANARY_TIMEOUT_MULTIPLIER" \
+    "$CANARY_MIN_DURATION" \
+    "$CANARY_SUSTAINED_SECONDS" <<'PYEOF'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+(
+    output,
+    wrapper,
+    canary,
+    model_repo,
+    model_revision,
+    model_path,
+    tp,
+    pp,
+    dp,
+    ep,
+    max_model_len,
+    max_num_seqs,
+    max_num_batched_tokens,
+    async_scheduling,
+    enable_thinking,
+    vllm_python_overlay,
+    slurm_job_id,
+    run_dir,
+    canary_concurrency,
+    calibration_tokens,
+    sustained_tokens,
+    depth_tokens,
+    min_depth_tokens,
+    metrics_interval,
+    stall_timeout,
+    unhealthy_window,
+    max_failure_rate,
+    min_health_failures,
+    hard_timeout,
+    request_timeout,
+    timeout_multiplier,
+    min_duration,
+    sustained_seconds,
+) = sys.argv[1:]
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+payload = {
+    "model_repo": model_repo,
+    "model_revision": model_revision,
+    "model_path": model_path,
+    "geometry": {"tp": int(tp), "pp": int(pp), "dp": int(dp), "ep": int(ep)},
+    "max_model_len": int(max_model_len),
+    "max_num_seqs": int(max_num_seqs),
+    "max_num_batched_tokens": int(max_num_batched_tokens),
+    "async_scheduling": async_scheduling,
+    "enable_thinking": int(enable_thinking),
+    "vllm_python_overlay": vllm_python_overlay or None,
+    "slurm_job_id": slurm_job_id,
+    "run_dir": run_dir,
+    "canary": {
+        "concurrency": int(canary_concurrency),
+        "calibration_tokens": int(calibration_tokens),
+        "sustained_tokens": int(sustained_tokens),
+        "depth_tokens": int(depth_tokens),
+        "min_depth_tokens": int(min_depth_tokens),
+        "metrics_interval": float(metrics_interval),
+        "stall_timeout": float(stall_timeout),
+        "unhealthy_window": float(unhealthy_window),
+        "max_failure_rate": float(max_failure_rate),
+        "min_health_failures": int(min_health_failures),
+        "hard_timeout": float(hard_timeout),
+        "request_timeout": float(request_timeout),
+        "timeout_multiplier": float(timeout_multiplier),
+        "min_duration": float(min_duration),
+        "sustained_seconds": float(sustained_seconds),
+    },
+    "files": {
+        "wrapper": {"path": wrapper, "sha256": digest(wrapper)},
+        "canary": {"path": canary, "sha256": digest(canary)},
+    },
+}
+Path(output).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+PYEOF
+  "$PYTHON" "$REPO_ROOT/hpc/vllm/sustained_decode_canary.py" \
+    --base-url "http://${HEAD_IP}:${API_PORT}" \
+    --model "$MODEL_REPO" \
+    --run-dir "$RUN_DIR" \
+    --vllm-log "$RUN_DIR/vllm.log" \
+    --concurrency "$CANARY_CONCURRENCY" \
+    --metrics-interval "$CANARY_METRICS_INTERVAL" \
+    --stall-timeout "$CANARY_STALL_TIMEOUT" \
+    --unhealthy-window "$CANARY_UNHEALTHY_WINDOW" \
+    --max-failure-rate "$CANARY_MAX_FAILURE_RATE" \
+    --min-health-failures "$CANARY_MIN_HEALTH_FAILURES" \
+    --hard-timeout "$CANARY_HARD_TIMEOUT" \
+    --request-timeout "$CANARY_REQUEST_TIMEOUT" \
+    --timeout-multiplier "$CANARY_TIMEOUT_MULTIPLIER" \
+    --min-duration "$CANARY_MIN_DURATION" \
+    --sustained-seconds "$CANARY_SUSTAINED_SECONDS" \
+    --calibration-tokens "$CANARY_CALIBRATION_TOKENS" \
+    --sustained-tokens "$CANARY_SUSTAINED_TOKENS" \
+    --depth-tokens "$CANARY_DEPTH_TOKENS" \
+    --min-depth-tokens "$CANARY_MIN_DEPTH_TOKENS"
 fi
 
 if [ "$RUN_EVAL" = "1" ]; then
