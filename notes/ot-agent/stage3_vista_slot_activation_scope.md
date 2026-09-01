@@ -1,7 +1,7 @@
 # Stage 3 — Vista slot-policy activation
 
 Date: 2026-09-01
-Status: scoped GO
+Status: DONE on Vista — activated 2026-09-01 11:57 CDT
 Companion: `vista-eval-slot-pool-plan.md`
 
 ## Why this is next
@@ -25,3 +25,13 @@ leaderboard work is eligible, the scheduler remains idle without fabricating wor
 ## Composes with / depends on
 
 Stages 1–2 green.
+
+## Activation evidence
+
+- Before/after Slurm job IDs were identical: eight RUNNING and two Priority
+  PENDING flawed_summ/A3 jobs; two `JobHeldUser` jobs remained excluded.
+- Replacement flawed_summ process is live with `--cap 20 --campaign-cap 8`.
+- First sweep reported `queue runnable=10/20; campaign=10/8` and made no
+  submission. Existing jobs are draining naturally toward eight.
+- `leaderboard-eval-pool` is live with pool 12, nominal agentic 8 and
+  nonagentic 4. Its reviewed queue is currently empty, so it submitted nothing.

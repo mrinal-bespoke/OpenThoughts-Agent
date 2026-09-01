@@ -1,7 +1,7 @@
 # Vista evaluation slot-pool plan
 
 Date: 2026-09-01
-Status: scoped GO — implementation authorized
+Status: activated on Vista
 Target: `/Users/mrinal/dev/OpenThoughts-Agent`
 Working copy: live operator workspace; preserve unrelated dirty and untracked work
 Branch: `pr/c-rescue-tacc-campaign-scripts`
@@ -31,7 +31,7 @@ results.
 |---|---|---|---|---:|---|
 | 1 ✅ | flawed_summ ownership cap | Add `--campaign-cap 8` alongside global cap 20 | controller | CPU | 15/15 focused tests green |
 | 2 ✅ | leaderboard FCFS policy | 12 total, 8/4 soft quotas, borrowing, failure circuit | scheduler | CPU | 25/25 combined focused tests green |
-| 3 | Vista activation | Restart controller with new flags and start pool scheduler | operations | live read-only + controller restart | No eval cancellation; queue converges toward 8/12 and stays at or below 20 |
+| 3 ✅ | Vista activation | Restart controller with new flags and start pool scheduler | operations | live read-only + controller restart | IDs unchanged; first sweep held at flawed 10/8 and global 10/20 |
 
 ## Global invariants
 
