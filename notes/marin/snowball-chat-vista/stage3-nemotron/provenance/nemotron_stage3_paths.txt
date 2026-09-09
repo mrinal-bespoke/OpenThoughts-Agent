@@ -1,0 +1,34 @@
+# Stage 3 (Nemotron Terminal) pinned shards -- EXPLICIT list, no glob.
+# dataset      nvidia/Nemotron-Terminal-Corpus
+# revision     a1667c4ffdadea02a89bffe4f1bb7ca2ff19f8d9
+# upstream_ref 9383df73c8e74450227f67ededfb665db403192c (PR #8172, frozen)
+# 29 files, 366,154 rows
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/dataset_adapters/code.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/dataset_adapters/math.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/dataset_adapters/swe.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/data_processing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/data_querying/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/data_science/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/debugging/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/dependency_management/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/file_operations/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/scientific_computing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/security/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/easy/software_engineering/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/data_processing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/data_querying/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/data_science/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/debugging/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/dependency_management/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/file_operations/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/model_training/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/scientific_computing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/security/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/software_engineering/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/medium/system_administration/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/data_processing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/data_science/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/debugging/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/file_operations/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/scientific_computing/data_filtered.parquet
+/scratch/11694/mkumar73/datasets/nemotron-terminal-rechunked/synthetic_tasks/skill_based/mixed/security/data_filtered.parquet

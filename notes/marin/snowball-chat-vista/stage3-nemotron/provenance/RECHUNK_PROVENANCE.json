@@ -1,0 +1,33 @@
+{
+  "files": {
+    "dataset_adapters/code.parquet": {
+      "content_identical": true,
+      "conversations_content_sha256": "d5d7701a9303b001960cbb1eb7633ba7cc0326bf126e5da4008e209bc07ff9cc",
+      "original_sha256": "739d3e13f14d10001832d0c49718a99f51ba1b5848df3e14b68189861bd99874",
+      "rechunked_sha256": "07abd0d343cd3d1e3d103babdc809752d26eaf354299d73e6fe474a3e17dde31",
+      "row_groups_after": 16,
+      "row_groups_before": 1,
+      "rows": 31960
+    },
+    "dataset_adapters/math.parquet": {
+      "content_identical": true,
+      "conversations_content_sha256": "42236760dcb7d5fe554440af1e5eb440e3161486e3cbb01c41d2e8c7ced5f76d",
+      "original_sha256": "0eacf5c4a8ac1c20b65dd3e23809311a1b1223c94c29183a62be397fa85566cc",
+      "rechunked_sha256": "94636befdbc8f94124d6ee58534828036a224152c3897105d913625f97ee84da",
+      "row_groups_after": 82,
+      "row_groups_before": 1,
+      "rows": 162692
+    },
+    "dataset_adapters/swe.parquet": {
+      "content_identical": true,
+      "conversations_content_sha256": "e99b91ccdc4b0b1894bba07b18e6d463ae995091e0557d4fd0caa0be1193eeec",
+      "original_sha256": "90cd061d73ac56a4f83fa4b9e9eca3c6df9c655a3e3c5de7888cd4be319a4033",
+      "rechunked_sha256": "2783ab5d62a87e1c7434a6742672a51fb774aafc4291ab0c5372dd24bcabd63f",
+      "row_groups_after": 16,
+      "row_groups_before": 1,
+      "rows": 31661
+    }
+  },
+  "rows_per_group": 2000,
+  "transformation": "row-group re-chunk only; content unchanged"
+}
