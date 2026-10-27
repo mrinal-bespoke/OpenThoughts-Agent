@@ -161,3 +161,14 @@ session submission and polling. Other execution remains delegated unchanged.
 Behavior tests execute the produced command against a disposable fake privilege
 boundary and verify cwd/env preservation and denial exit1; both failed before
 the fix.135 autoeval tests pass; live verification remains required.
+
+Fresh v3 at 3503979 passed real Harbor setup, exact-output command and cleanup
+in 3.678s. The environment deadline remains 60s. Exact environment
+53505d4a-3dfa-42f5-918f-890f1ed803bf independently returned NotFound before
+the full smoke was submitted. This qualifies login setup only. Both failed
+setup attempts and the wrapper test are preserved, with independent cleanup.
+
+Fresh full smoke 1105363/run ae32-a5204d2ec269b61beaf5147f8bb2b951 was
+submitted once at 2026-10-27T23:46:20Z from 3503979. Initial PENDING Priority;
+900s allocation/Requeue0, queue deadline 2026-10-28T05:46:20Z. Prior scored
+results and failures are untouched. Full agent/reward/audit proof remains pending.

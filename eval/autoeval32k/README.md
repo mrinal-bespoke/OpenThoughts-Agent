@@ -17,6 +17,9 @@ No history summarization or terminal-output truncation is allowed. Overflow is
 an explicit failure. Temperature is 0.6; thinking mode and tokenizer template
 hash are explicit. One trial per task, no trial/generation/sandbox-create retry.
 Harbor's underlying command/file-transfer retry behavior is unchanged.
+Explicit root commands use noninteractive `sudo -n`; existing snapshots must
+permit that operation. The adapter preserves command environment, working
+directory and deadline. Snapshot/API user metadata is not effective-user proof.
 
 The strict transport retains the Terminus-2 parser/loop, but it bypasses hidden
 LLM retries. It is a new evaluation profile, not a claim of byte-for-byte parity
