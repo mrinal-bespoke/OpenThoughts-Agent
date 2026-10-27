@@ -87,3 +87,13 @@ and an independent SDK lookup also returned DaytonaNotFoundError. No active
 allocation remains. Preserve failed raw outputs, config and journals. Next,
 isolate the session-command path with bounded diagnostics before another model
 smoke; no end-to-end pass or repository migration is established.
+
+## Session API isolation
+
+Installed Daytona and async toolbox client are both 0.203.0; aiohttp is 3.14.5.
+get_session_command supports an explicit request_timeout but Harbor calls it
+without one. The outer 60-second environment cap did stop the stalled request;
+that is not evidence that a longer timeout would help. Prepare one login-node
+diagnostic comparing direct SDK execution with session create/execute/get/logs.
+Body cap 24s, cleanup cap 10s, one existing-snapshot environment, no GPU job.
+This checks API behavior on login only; compute remains a separate gate.
