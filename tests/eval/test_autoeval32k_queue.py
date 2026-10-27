@@ -80,6 +80,52 @@ def test_supported_scheduler_receipt_formats(tmp_path, output):
     assert launch(tmp_path, output=output)["job_id"] == "123"
 
 
+def test_banner_receipt_is_reconciled_from_exact_new_scheduler_identity(tmp_path):
+    queue = []
+
+    def dispatch(command):
+        queue.append(row("123", run_id="run-1"))
+        return "site notice\n123\n"
+
+    receipt = submit_once(
+        tmp_path, "run-1", COMMAND, query_queue=lambda: queue, submit=dispatch
+    )
+    assert receipt["job_id"] == "123" and receipt["reconciled"]
+    assert (
+        json.loads((tmp_path / "runs/run-1/submission-output.json").read_text())[
+            "stdout"
+        ]
+        == "site notice\n123\n"
+    )
+    assert (
+        launch(tmp_path, submit=lambda _: pytest.fail("must not dispatch again"))
+        == receipt
+    )
+
+
+def test_two_matching_scheduler_records_cannot_resolve_receipt(tmp_path):
+    queue = []
+
+    def dispatch(command):
+        queue.extend([row("123", run_id="run-1"), row("124", run_id="run-1")])
+        return "site notice\n123\n"
+
+    with pytest.raises(QueueSafetyError, match="ambiguous"):
+        submit_once(
+            tmp_path, "run-1", COMMAND, query_queue=lambda: queue, submit=dispatch
+        )
+    assert not (tmp_path / "runs/run-1/receipt.json").exists()
+
+
+def test_existing_exact_name_blocks_an_unjournaled_duplicate(tmp_path):
+    with pytest.raises(QueueSafetyError, match="already exists"):
+        launch(
+            tmp_path,
+            rows=[row("123", run_id="run-1")],
+            submit=lambda _: pytest.fail("must not dispatch"),
+        )
+
+
 def test_same_identity_cannot_be_reused_for_a_changed_command(tmp_path):
     launch(tmp_path)
     with pytest.raises(QueueSafetyError, match="another command"):

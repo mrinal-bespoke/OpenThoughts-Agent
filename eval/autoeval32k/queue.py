@@ -221,6 +221,10 @@ def submit_once(
                 "Dispatch outcome uncertain; reconcile, never resubmit"
             )
         queue = _rows(query_queue())
+        if any(row.get("run_id") == run_id for row in queue.values()):
+            raise QueueSafetyError(
+                "Matching scheduler job already exists; reconcile first"
+            )
         count = sum(
             row["state"] in _ACTIVE
             and not (row["state"] == "PENDING" and row["reason"] in _HELD)
@@ -250,14 +254,31 @@ def submit_once(
         output = submit(list(command))
         if not isinstance(output, str):
             raise QueueSafetyError("Scheduler returned non-text receipt")
+        _write_new(
+            directory / "submission-output.json",
+            {
+                "schema_version": 1,
+                "run_id": run_id,
+                "stdout": output,
+            },
+        )
         match = re.fullmatch(
             r"(?:Submitted batch job )?([1-9][0-9]*)(?:;[A-Za-z0-9_.-]+)?\s*", output
         )
-        if not match:
-            raise QueueSafetyError(
-                "Scheduler returned an ambiguous receipt; do not retry"
-            )
-        jid = match[1]
+        reconciled = False
+        if match:
+            jid = match[1]
+        else:
+            # Site banners may accompany --parsable output. Do not guess an ID
+            # from arbitrary text: require one new exact-name scheduler record.
+            after = _rows(query_queue())
+            candidates = [row for row in after.values() if row.get("run_id") == run_id]
+            if len(candidates) != 1:
+                raise QueueSafetyError(
+                    "Scheduler returned an ambiguous receipt; do not retry"
+                )
+            jid = candidates[0]["job_id"]
+            reconciled = True
         if jid in queue or any(
             receipt and receipt["job_id"] == jid for _, receipt, _ in existing.values()
         ):
@@ -265,6 +286,8 @@ def submit_once(
                 "Scheduler returned an already known job ID; do not retry"
             )
         receipt = {"schema_version": 1, "run_id": run_id, "job_id": jid}
+        if reconciled:
+            receipt["reconciled"] = True
         _write_new(directory / "receipt.json", receipt)
         return receipt
 

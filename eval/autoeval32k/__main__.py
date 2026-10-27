@@ -183,7 +183,7 @@ def materialize(planned):
 
 def query_queue():
     result = subprocess.run(
-        ["squeue", "-h", "-u", getpass.getuser(), "-o", "%i|%T|%r"],
+        ["squeue", "-h", "-u", getpass.getuser(), "-o", "%i|%T|%r|%j"],
         check=True,
         capture_output=True,
         text=True,
@@ -192,9 +192,9 @@ def query_queue():
     rows = []
     for line in result.stdout.splitlines():
         parts = line.split("|")
-        if len(parts) != 3:
+        if len(parts) != 4:
             raise ValueError("Malformed all-user scheduler response")
-        rows.append(dict(zip(("job_id", "state", "reason"), parts)))
+        rows.append(dict(zip(("job_id", "state", "reason", "run_id"), parts)))
     return rows
 
 

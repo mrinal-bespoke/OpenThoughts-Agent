@@ -48,10 +48,11 @@ DependencyNeverSatisfied jobs count. Held jobs remain untouched.
 Stage 0 CPU gate passed. Stage 1 implementation/testing in progress. Human
 renewed TACC access October 27; bounded reads now succeed. A private pinned
 Harbor checkout reuses existing dependencies without changing the installed
-environment. No smoke allocation has been submitted yet.
+environment. Smoke job 1104859 was submitted exactly once with a fifteen-minute
+allocation limit and a five-minute queue limit. Live execution is outstanding.
 
 Stage 1 local checkpoint: intake, queue, runner, strict adapters and audit have
-159 passing focused/neighboring tests. Live qualification is outstanding. Full
+164 passing focused/neighboring tests. Live qualification is outstanding. Full
 eval regression is blocked by missing dependency/source imports outside this
 change. Concurrency remains 1; Jupiter is rejected by deployment validation.
 

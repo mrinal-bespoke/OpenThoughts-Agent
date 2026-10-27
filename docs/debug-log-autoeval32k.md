@@ -31,3 +31,18 @@ cache and use a fresh metadata-attempt directory; never overwrite evidence.
 The existing TACC batch recipe also loads gcc/13.2.0 and cuda/12.8 and uses
 enforce-eager. Carry these into the isolated allocation instead of introducing
 an unqualified JIT/compiler configuration.
+
+## Scheduler receipt
+
+The first submission from commit 87e96c58da9a757365e4e85eb69e3aebfd5561cf
+returned text rejected by the strict receipt parser. The original implementation
+did not retain the text, so its exact format is unknown. Scheduler records showed
+one exact-name job, 1104859, pending Priority. Reconciled that job through the
+existing queue API without resubmission. Calling the same CLI request then
+returned its existing receipt, confirming duplicate suppression live.
+
+Save scheduler stdout before parsing in future submissions. If the response is
+ambiguous, reconcile only one new exact-name scheduler row; reject zero or
+multiple matches. Reject an existing exact-name job before dispatch as well.
+Three regression tests cover those cases. Combined local gate: 164 passed.
+This fix is not deployed into the frozen submitted job.
