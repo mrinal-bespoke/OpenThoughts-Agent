@@ -11,6 +11,20 @@ from .protocol import Manifest, token
 from .runtime import write_new
 
 
+def read_template(path):
+    """Freeze explicit Qwen3 template bytes without importing a GPU stack."""
+    path = Path(path)
+    if (path / "chat_template.jinja").is_file():
+        template = (path / "chat_template.jinja").read_text()
+    else:
+        template = json.loads((path / "tokenizer_config.json").read_text()).get(
+            "chat_template"
+        )
+    if not isinstance(template, str) or not template:
+        raise ValueError("A single explicit tokenizer template is required")
+    return template
+
+
 def freeze_checkpoint(spec, repo, revision, thinking, cache_dir, *, resolve=None):
     """Resolve metadata into a fresh private cache and return an immutable manifest.
 
@@ -35,7 +49,6 @@ def freeze_checkpoint(spec, repo, revision, thinking, cache_dir, *, resolve=None
     cache_dir.mkdir(parents=True, exist_ok=False)
     if resolve is None:
         from huggingface_hub import HfApi, snapshot_download
-        from transformers import AutoTokenizer
 
         def resolve(repo, revision, cache_dir):
             info = HfApi().model_info(repo, revision=revision)
@@ -49,20 +62,12 @@ def freeze_checkpoint(spec, repo, revision, thinking, cache_dir, *, resolve=None
                 cache_dir=cache_dir,
                 allow_patterns=[
                     "config.json",
-                    "tokenizer*",
-                    "vocab*",
-                    "merges.txt",
-                    "*.jinja",
-                    "chat_template*",
-                    "special_tokens_map.json",
-                    "added_tokens.json",
+                    "tokenizer_config.json",
+                    "chat_template.jinja",
                 ],
             )
             config = json.loads((Path(path) / "config.json").read_text())
-            tokenizer = AutoTokenizer.from_pretrained(
-                path, local_files_only=True, trust_remote_code=False
-            )
-            return info.sha, config, tokenizer.chat_template
+            return info.sha, config, read_template(path)
 
     sha, config, template = resolve(repo, revision, cache_dir)
     if sha != revision or config.get("model_type") != "qwen3":

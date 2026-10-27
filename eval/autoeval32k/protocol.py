@@ -19,6 +19,7 @@ PROFILE = {
     "retries": 0,
     "dtype": "bfloat16",
     "tensor_parallel": 1,
+    "enforce_eager": True,
 }
 
 
@@ -219,6 +220,7 @@ def serve_command(manifest, python, snapshot, port=8000, concurrency=1):
         str(concurrency),
         "--gpu-memory-utilization",
         "0.9",
+        "--enforce-eager",
     ]
 
 

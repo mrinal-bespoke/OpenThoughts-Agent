@@ -1,10 +1,11 @@
 """Published checkpoint resolution is the only simulated service boundary."""
 
 import hashlib
+import json
 
 import pytest
 
-from eval.autoeval32k.intake import freeze_checkpoint
+from eval.autoeval32k.intake import freeze_checkpoint, read_template
 from tests.eval import test_autoeval32k
 
 
@@ -13,6 +14,23 @@ def spec():
     data = test_autoeval32k.example_manifest()
     del data["model"]
     return data
+
+
+def test_explicit_template_file_takes_precedence(tmp_path):
+    (tmp_path / "tokenizer_config.json").write_text(
+        json.dumps({"chat_template": "old"})
+    )
+    assert read_template(tmp_path) == "old"
+    (tmp_path / "chat_template.jinja").write_text("published template\n")
+    assert read_template(tmp_path) == "published template\n"
+
+
+def test_ambiguous_template_mapping_is_rejected(tmp_path):
+    (tmp_path / "tokenizer_config.json").write_text(
+        json.dumps({"chat_template": {"one": "x", "two": "y"}})
+    )
+    with pytest.raises(ValueError, match="single explicit"):
+        read_template(tmp_path)
 
 
 def test_published_pin_and_template_are_frozen(spec, tmp_path):

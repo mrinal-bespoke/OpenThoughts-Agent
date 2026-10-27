@@ -85,6 +85,17 @@ def plan(manifest, settings):
     ]
     seconds = settings["walltime_seconds"]
     walltime = f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+    # Match the already proven Vista compiler/CUDA setup, in this job only.
+    setup = (
+        "set -eu; umask 077; ulimit -c 0; module purge; "
+        "module load gcc/13.2.0 cuda/12.8; unset PYTHONPATH PYTHONHOME; "
+        "export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 SLURM_EXPORT_ENV=ALL; "
+        "export CC=gcc CXX=g++ TRITON_CC=gcc; "
+        "export PATH="
+        + shlex.quote(str(Path(settings["serve_python"]).parent))
+        + ':"$PATH"; '
+        "exec " + shlex.join(argv)
+    )
     command = [
         "sbatch",
         "--parsable",
@@ -100,7 +111,7 @@ def plan(manifest, settings):
         "--signal=B:TERM@60",
         "--chdir=" + str(bundle / "code"),
         "--output=" + str(bundle / "slurm-%j.log"),
-        "--wrap=exec " + shlex.join(argv),
+        "--wrap=exec " + shlex.join(["/bin/bash", "--login", "-c", setup]),
     ]
     return {
         "run_id": manifest.run_id,
