@@ -109,3 +109,21 @@ exact output and deletion absence confirmed. Sandbox ID
 8e1599b2-069b-4e46-b5f8-f9182fcda353. No model or allocation was used. This
 does not reproduce or explain the compute stall. Next: the same short diagnostic
 from compute before loading another model; retain the original failed trial.
+
+The compute diagnostic 1105146 passed the same direct/session operations in
+5.418s on c642-011; allocation elapsed39s, COMPLETED0:0. Exact temporary sandbox
+76beb1fc-b795-45dc-b466-b9bfa7b788c2 independently returned DaytonaNotFoundError.
+This rules out a persistent inability to use these APIs from that compute node,
+not a transient failure or a difference in Harbor's session polling/setup path.
+Next compare those paths before another model smoke. Do not increase timeout.
+
+## Real Harbor setup isolation
+
+The passing SDK probe omitted Harbor's root-user shell wrapper, log-directory
+mount targets, shared-client configuration, and its session polling loop. Test
+the unchanged SnapshotOnly.start path with the same hello task, mount targets
+and 60-second environment budget, recording entry/return/error for each setup
+operation. One fresh login-node diagnostic, no model; hard process cap210s
+includes existing failure cleanup. No command retry or transport alteration is
+added by the instrumentation. Follow with one exact-output exec and deletion.
+The original 1105146 allocation has now disappeared from the live queue.
