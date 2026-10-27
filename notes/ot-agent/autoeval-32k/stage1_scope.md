@@ -31,3 +31,9 @@ ae32-7761e93294d7687a1ddb10418c90e538. Allow six hours queued from
 900-second allocation cap. Same model, task and existing snapshot; no benchmark.
 Require synthetic verifier reward 1, actual agent activity, audit and confirmed
 cleanup before migration. Policy must contain rules only, not readiness status.
+
+Version-guard continuation: 1104938 failed before serving with no sandbox.
+After regression-tested fix bfc35a4, fresh job 1105033/run
+ae32-233b837708abe709515ec486e0dd6d91 was submitted once at
+2026-10-27T21:10:02Z. Queue deadline 2026-10-28T03:10:02Z; allocation remains
+900 seconds, no requeue. Same model/task/snapshot and all success gates.

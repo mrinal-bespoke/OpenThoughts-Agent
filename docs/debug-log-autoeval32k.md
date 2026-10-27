@@ -65,3 +65,25 @@ both versions and GPU evidence before checking. Do not change the environment.
 Regression-first test failed on the missing helper; after the fix, 185 focused
 and neighboring tests pass. Ruff passes with caching disabled; the repository
 has no infra/pre-commit.py entry point. A fresh synthetic run is still required.
+
+## Schema mutation and environment setup timeout
+
+Job 1105033 failed in 241 seconds. Checkpoint integrity, GPU BF16, both vLLM
+version checks and an actual completion passed. Daytona snapshot lookup and
+creation succeeded. Environment startup timed out at 60 seconds in ensure_dirs,
+waiting for get_session_command through the async toolbox client. Agent and
+verifier never started; reward is null. The stack identifies the waiting call,
+not why it stalled. Do not increase the timeout or infer an authentication fault.
+
+Result processing separately rejected the stored config: JobConfig's compatibility
+validator mutated the submitted dictionary, moving orchestrator.retry and
+orchestrator.n_concurrent_trials to top-level fields. Raw trial protocol fields
+and task hashes match. Validate a deep copy so the frozen input stays unchanged;
+retain the effective-field assertions. A regression using the real schema was
+red before the helper and passes after the fix. Combined suite: 186 passed.
+
+Cleanup for exact sandbox 13980649-df31-4009-b9d6-b4ca1327a29a recorded not_found
+and an independent SDK lookup also returned DaytonaNotFoundError. No active
+allocation remains. Preserve failed raw outputs, config and journals. Next,
+isolate the session-command path with bounded diagnostics before another model
+smoke; no end-to-end pass or repository migration is established.

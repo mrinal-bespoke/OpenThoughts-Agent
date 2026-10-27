@@ -69,3 +69,16 @@ was submitted once at 2026-10-27T20:43:58Z with six hours allowed in queue and
 the unchanged fifteen-minute execution cap. Initial state: PENDING Priority.
 Follow-up `tacc-32k-smoke-and-pipeline-migration` tracks the live gate and the
 subsequent migration. The policy will be normative; readiness stays in logs.
+
+Job 1104938 failed after 89 seconds before serving, with checkpoint verification
+passed and no sandbox creation. A wheel/source version-string mismatch was
+identified and fixed in bfc35a4; 185 tests pass. Fresh synthetic job 1105033 was
+submitted once at 2026-10-27T21:10:02Z, six-hour queue deadline
+2026-10-28T03:10:02Z and unchanged 900-second execution cap. Migration remains
+gated on the full live pass. Prior evidence and journals remain intact.
+
+1105033 failed after 241 seconds: GPU and serving passed, environment setup timed
+out waiting for a Daytona session command. Agent/verifier were not reached.
+Cleanup independently confirmed. A separate config-mutation audit bug is fixed
+locally with 186 tests passing. Diagnose session transport before another smoke;
+no new allocation is pending and migration remains gated.

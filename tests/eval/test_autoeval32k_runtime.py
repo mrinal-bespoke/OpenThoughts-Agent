@@ -13,6 +13,7 @@ from eval.autoeval32k.runtime import (
     run,
     read_daytona_key,
     validate_vllm_versions,
+    parse_harbor_config,
 )
 from tests.eval import test_autoeval32k
 
@@ -45,6 +46,17 @@ def test_cuda_wheel_pin_checks_distribution_and_import_version():
 def test_wrong_or_unproven_vllm_build_rejects(observed):
     with pytest.raises(ValueError, match="vLLM"):
         validate_vllm_versions("0.20.1rc1.dev0+g506029539.cu128", observed)
+
+
+def test_schema_validation_preserves_frozen_config(manifest_data, tmp_path):
+    manifest = Manifest.parse(manifest_data)
+    config = render_harbor(manifest, tmp_path)
+    before = json.dumps(config, sort_keys=True)
+    parsed = parse_harbor_config(config, concurrency=1)
+    assert json.dumps(config, sort_keys=True) == before
+    assert parsed.n_attempts == 1
+    assert parsed.retry.max_retries == 0
+    assert parsed.n_concurrent_trials == 1
 
 
 @pytest.fixture

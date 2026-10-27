@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import json
 import math
@@ -37,6 +38,20 @@ def validate_vllm_versions(expected, observed):
         re.sub(r"\.cu[0-9]+$", "", expected),
     }:
         raise ValueError("vLLM runtime pin mismatch")
+
+
+def parse_harbor_config(config, concurrency):
+    """Validate effective settings without letting schema migration mutate evidence."""
+    from harbor.models.job.config import JobConfig
+
+    parsed = JobConfig.model_validate(copy.deepcopy(config))
+    if (
+        parsed.n_attempts != 1
+        or parsed.retry.max_retries != 0
+        or parsed.n_concurrent_trials != concurrency
+    ):
+        raise ValueError("Harbor ignored required protocol fields")
+    return parsed
 
 
 def read_daytona_key(path):
@@ -295,16 +310,7 @@ def run(manifest, settings, run_dir):
         tasks = stage_tasks(manifest, run_dir)
         config = render_harbor(manifest, run_dir, settings["concurrency"])
         config["tasks"] = tasks
-        from harbor.models.job.config import JobConfig
-
-        parsed = JobConfig.model_validate(config)
-        # Require effective values; older schemas silently ignore unknown fields.
-        if (
-            parsed.n_attempts != 1
-            or parsed.retry.max_retries != 0
-            or parsed.n_concurrent_trials != settings["concurrency"]
-        ):
-            raise ValueError("Harbor ignored required protocol fields")
+        parsed = parse_harbor_config(config, settings["concurrency"])
         write_new(run_dir / "harbor-config.json", config)
         model = manifest.as_dict()["model"]
         # Tokenizer dependencies already live in the serving environment. Bound
