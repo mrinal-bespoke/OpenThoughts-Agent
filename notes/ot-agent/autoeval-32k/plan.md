@@ -63,3 +63,9 @@ reusable implementation, tests and docs to open-thoughts/open-thoughts-next.
 Do not migrate an unvalidated implementation or copy credentials, site-specific
 deployment settings, old results or campaign monitors. Concurrency and Jupiter
 follow that move.
+
+Human approved a fresh continuation with a longer queue allowance. Job 1104938
+was submitted once at 2026-10-27T20:43:58Z with six hours allowed in queue and
+the unchanged fifteen-minute execution cap. Initial state: PENDING Priority.
+Follow-up `tacc-32k-smoke-and-pipeline-migration` tracks the live gate and the
+subsequent migration. The policy will be normative; readiness stays in logs.
