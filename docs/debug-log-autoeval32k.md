@@ -147,3 +147,17 @@ nonroot create-parameter drift before intent. Do not modify the snapshot,
 shared Harbor/runtime, shell wrappers, polling, or60s budget. Two regression
 checks were red before this change;134 autoeval tests now pass and Ruff passes.
 Live setup verification with this fix is still required before another model run.
+
+The os_user fix did not change the actual toolbox process user. In fresh v2,
+the API reported root but id still returned uid1001(daytona), and the identical
+su command remained running. Preserve that failed attempt and commit7d68250;
+remove the ineffective creation override. A bounded direct sudo -n id -u in
+that exact owned environment returned0, establishing noninteractive privilege
+availability without changing authentication settings.
+
+Override only explicit root execution in the private adapter: sudo -n, no
+interactive fallback, preserving shell/env/cwd and the inherited timeout,
+session submission and polling. Other execution remains delegated unchanged.
+Behavior tests execute the produced command against a disposable fake privilege
+boundary and verify cwd/env preservation and denial exit1; both failed before
+the fix.135 autoeval tests pass; live verification remains required.

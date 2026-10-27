@@ -12,6 +12,7 @@ import inspect
 import json
 import math
 import re
+import shlex
 import uuid
 from pathlib import Path
 
@@ -138,6 +139,26 @@ class SnapshotOnly(DaytonaEnvironment):
             },
         )
 
+    async def _sandbox_exec(
+        self, command, cwd=None, env=None, timeout_sec=None, shell="bash -c", user=None
+    ):
+        if user == "root" or user == 0:
+            # Existing snapshots can run the toolbox as a nonroot user even when
+            # the create API reports root. Never let su wait for a password.
+            if env:
+                assignments = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+                command = f"env {assignments} {shell} {shlex.quote(command)}"
+            if cwd:
+                command = f"cd {shlex.quote(cwd)} && {command}"
+            return await super()._sandbox_exec(
+                command,
+                timeout_sec=timeout_sec,
+                shell=f"sudo -n --user=root -- {shell}",
+            )
+        return await super()._sandbox_exec(
+            command, cwd=cwd, env=env, timeout_sec=timeout_sec, shell=shell, user=user
+        )
+
     async def _resolve_start_sandbox_params(self, daytona, resources, *, force_build):
         if force_build:
             raise ValueError("Building environments is forbidden")
@@ -156,9 +177,6 @@ class SnapshotOnly(DaytonaEnvironment):
         )
         return CreateSandboxFromSnapshotParams(
             snapshot=snapshot.name,
-            # Harbor prepares /logs via su root. A snapshot's nonroot default
-            # can block that command awaiting authentication instead of exiting.
-            os_user="root",
             ephemeral=True,
             public=False,
             auto_stop_interval=self._auto_stop_interval,
@@ -180,11 +198,7 @@ class SnapshotOnly(DaytonaEnvironment):
     async def _create_sandbox(self, params, daytona=None):
         if daytona is None or not isinstance(params, CreateSandboxFromSnapshotParams):
             raise ValueError("Only a verified existing-snapshot create is supported")
-        if (
-            params.snapshot != self._task["snapshot"]
-            or params.labels != self._labels
-            or params.os_user != "root"
-        ):
+        if params.snapshot != self._task["snapshot"] or params.labels != self._labels:
             raise ValueError("Create parameters differ from verified snapshot policy")
         if not (self._evidence / "snapshot-verified.json").exists():
             raise ValueError("Snapshot has not been verified")
@@ -194,7 +208,6 @@ class SnapshotOnly(DaytonaEnvironment):
             labels=self._labels,
             snapshot=self._task["snapshot"],
             snapshot_id=self._task["snapshot_id"],
-            os_user=params.os_user,
         )
         task = asyncio.create_task(daytona.create(params=params, timeout=self._budget))
         try:

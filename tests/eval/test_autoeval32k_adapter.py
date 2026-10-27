@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -120,7 +122,6 @@ def test_existing_snapshot_one_create_and_idempotent_exact_cleanup(manifest, tmp
             service, None, force_build=False
         )
         assert params.snapshot == "existing" and params.ephemeral is True
-        assert params.os_user == "root"
         assert params.auto_stop_interval > 0 and params.auto_delete_interval == 0
         await env._create_sandbox(params, service)
         with pytest.raises(FileExistsError):
@@ -135,18 +136,60 @@ def test_existing_snapshot_one_create_and_idempotent_exact_cleanup(manifest, tmp
     asyncio.run(scenario())
 
 
-def test_nonroot_creation_rejected_before_intent(manifest, tmp_path):
+@pytest.mark.parametrize("privilege_available", [True, False])
+def test_explicit_root_exec_is_noninteractive_and_preserves_context(
+    manifest, tmp_path, monkeypatch, privilege_available
+):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sudo = bin_dir / "sudo"
+    sudo.write_text(
+        "#!/bin/sh\n"
+        'test "$1" = -n && test "$2" = --user=root && test "$3" = -- || exit 99\n'
+        + ('shift 3\nexec "$@"\n' if privilege_available else "exit 1\n")
+    )
+    sudo.chmod(0o755)
+    su = bin_dir / "su"
+    su.write_text("#!/bin/sh\nexit 99\n")
+    su.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+    work = tmp_path / "working directory"
+    work.mkdir()
+
+    class Process:
+        async def create_session(self, session_id):
+            pass
+
+        async def execute_session_command(self, session_id, request, timeout):
+            self.result = subprocess.run(
+                request.command, shell=True, capture_output=True, text=True, timeout=3
+            )
+            return SimpleNamespace(cmd_id="command")
+
+        async def get_session_command(self, session_id, command_id):
+            return SimpleNamespace(id=command_id, exit_code=self.result.returncode)
+
+        async def get_session_command_logs(self, session_id, command_id):
+            return SimpleNamespace(stdout=self.result.stdout, stderr=self.result.stderr)
+
     async def scenario():
         env = environment(manifest, tmp_path)
-        service = Service()
-        params = await env._resolve_start_sandbox_params(
-            service, None, force_build=False
+        env._sandbox = SimpleNamespace(process=Process())
+        result = await env.exec(
+            'printf "%s\\n" "$PROBE_VALUE"; pwd',
+            cwd=str(work),
+            env={"PROBE_VALUE": "value with spaces; literal"},
+            user="root",
         )
-        params.os_user = "daytona"
-        with pytest.raises(ValueError, match="Create parameters"):
-            await env._create_sandbox(params, service)
-        assert service.creates == 0
-        assert not (tmp_path / "trial/sandbox-create-intent.json").exists()
+        if privilege_available:
+            assert result.return_code == 0
+            assert result.stdout.splitlines() == [
+                "value with spaces; literal",
+                str(work),
+            ]
+        else:
+            assert result.return_code == 1
+            assert result.stdout == ""
 
     asyncio.run(scenario())
 
