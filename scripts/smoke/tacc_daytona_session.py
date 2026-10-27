@@ -26,8 +26,8 @@ async def probe(root, credential_file):
     passed = False
     cleaned = False
 
-    def record(name, **data):
-        with (root / name).open("x") as stream:
+    def record(filename, **data):
+        with (root / filename).open("x") as stream:
             json.dump(data, stream)
 
     async def step(name, awaitable, seconds=4):

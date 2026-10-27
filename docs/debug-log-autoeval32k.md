@@ -97,3 +97,8 @@ that is not evidence that a longer timeout would help. Prepare one login-node
 diagnostic comparing direct SDK execution with session create/execute/get/logs.
 Body cap 24s, cleanup cap 10s, one existing-snapshot environment, no GPU job.
 This checks API behavior on login only; compute remains a separate gate.
+
+First diagnostic exited in 0.16s after successful snapshot lookup, before any
+creation intent. Its evidence writer's positional name argument collided with
+the snapshot name field. Rename that parameter; preserve the failed diagnostic
+directory and use a new v2 directory. This attempt tested no command transport.
