@@ -49,7 +49,9 @@ Stage 0 CPU gate passed. Stage 1 implementation/testing in progress. Human
 renewed TACC access October 27; bounded reads now succeed. A private pinned
 Harbor checkout reuses existing dependencies without changing the installed
 environment. Smoke job 1104859 was submitted exactly once with a fifteen-minute
-allocation limit and a five-minute queue limit. Live execution is outstanding.
+allocation limit and a five-minute queue limit. It remained pending Priority
+and was cancelled at the queue deadline, with zero elapsed runtime and no
+compute directory or Daytona creation. Live execution is outstanding.
 
 Stage 1 local checkpoint: intake, queue, runner, strict adapters and audit have
 164 passing focused/neighboring tests. Live qualification is outstanding. Full

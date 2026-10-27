@@ -18,3 +18,8 @@ Reuse proven TACC serving dependencies, pinned model cache (content verified)
 and the existing daytona-small snapshot. One synthetic task, five-minute queue
 wait cap and fifteen-minute allocation cap; never submit an automatic retry.
 Concurrency remains 1. Jupiter is rejected by the CLI.
+
+October 27 outcome: job 1104859 stayed pending and was cancelled after the
+five-minute queue budget. Intake, exact-source/schema checks and live duplicate
+suppression passed; compute, agent, verifier and cleanup gates were not reached.
+No successful end-to-end claim or migration is authorized by this evidence.
