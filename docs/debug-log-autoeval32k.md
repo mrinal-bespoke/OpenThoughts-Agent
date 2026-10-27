@@ -102,3 +102,10 @@ First diagnostic exited in 0.16s after successful snapshot lookup, before any
 creation intent. Its evidence writer's positional name argument collided with
 the snapshot name field. Rename that parameter; preserve the failed diagnostic
 directory and use a new v2 directory. This attempt tested no command transport.
+
+Corrected diagnostic bbf2616 passed on the TACC login node in 2.38s. Snapshot
+lookup, create, direct command, session create/execute/get/logs all passed;
+exact output and deletion absence confirmed. Sandbox ID
+8e1599b2-069b-4e46-b5f8-f9182fcda353. No model or allocation was used. This
+does not reproduce or explain the compute stall. Next: the same short diagnostic
+from compute before loading another model; retain the original failed trial.

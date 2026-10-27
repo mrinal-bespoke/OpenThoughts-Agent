@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import socket
 import time
 from pathlib import Path
 
@@ -29,6 +30,15 @@ async def probe(root, credential_file):
     def record(filename, **data):
         with (root / filename).open("x") as stream:
             json.dump(data, stream)
+
+    job_id = os.environ.get("SLURM_JOB_ID")
+    record(
+        "started.json",
+        hostname=socket.gethostname(),
+        slurm_job_id=job_id,
+        slurm_job_name=os.environ.get("SLURM_JOB_NAME"),
+        purpose=purpose,
+    )
 
     async def step(name, awaitable, seconds=4):
         with (root / "stages.jsonl").open("a") as stream:
@@ -188,8 +198,10 @@ async def probe(root, credential_file):
                 passed=passed and cleaned,
                 transport_passed=passed,
                 elapsed_seconds=time.monotonic() - started,
-                location="TACC login node",
-                compute_validated=False,
+                location="TACC compute node" if job_id else "TACC login node",
+                compute_validated=bool(job_id) and passed,
+                slurm_job_id=job_id,
+                hostname=socket.gethostname(),
                 model_loaded=False,
             )
 
