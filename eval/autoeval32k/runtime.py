@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -25,6 +26,17 @@ def write_new(path, value):
         json.dump(value, stream, sort_keys=True, allow_nan=False, indent=2)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def validate_vllm_versions(expected, observed):
+    """Pin the installed wheel and verify its imported source version separately."""
+    distribution = observed.get("vllm_distribution")
+    imported = observed.get("vllm")
+    if distribution != expected or imported not in {
+        expected,
+        re.sub(r"\.cu[0-9]+$", "", expected),
+    }:
+        raise ValueError("vLLM runtime pin mismatch")
 
 
 def read_daytona_key(path):
@@ -332,10 +344,12 @@ def run(manifest, settings, run_dir):
             [
                 settings["serve_python"],
                 "-c",
-                "import json,torch,vllm; assert torch.cuda.is_available(); "
+                "import json,torch,vllm,importlib.metadata; assert torch.cuda.is_available(); "
                 "x=torch.ones((16,16),device='cuda',dtype=torch.bfloat16); y=x@x; "
                 "torch.cuda.synchronize(); assert bool((y==16).all()); "
-                "print(json.dumps({'vllm':vllm.__version__,'bf16':True,'gpu':torch.cuda.get_device_name(0)}))",
+                "print(json.dumps({'vllm':vllm.__version__,"
+                "'vllm_distribution':importlib.metadata.version('vllm'),"
+                "'bf16':True,'gpu':torch.cuda.get_device_name(0)}))",
             ],
             text=True,
             capture_output=True,
@@ -343,9 +357,8 @@ def run(manifest, settings, run_dir):
             timeout=manifest.as_dict()["budgets"]["startup_seconds"],
         )
         gpu = json.loads(probe.stdout.splitlines()[-1])
-        if gpu["vllm"] != manifest.as_dict()["runtime"]["vllm_version"]:
-            raise ValueError("vLLM runtime pin mismatch")
         write_new(run_dir / "gpu.json", gpu)
+        validate_vllm_versions(manifest.as_dict()["runtime"]["vllm_version"], gpu)
         env = dict(
             os.environ,
             HF_HOME=str(run_dir / "hf-cache"),

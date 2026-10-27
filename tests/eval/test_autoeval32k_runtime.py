@@ -12,8 +12,39 @@ from eval.autoeval32k.runtime import (
     normalize_harbor,
     run,
     read_daytona_key,
+    validate_vllm_versions,
 )
 from tests.eval import test_autoeval32k
+
+
+def test_cuda_wheel_pin_checks_distribution_and_import_version():
+    validate_vllm_versions(
+        "0.20.1rc1.dev0+g506029539.cu128",
+        {
+            "vllm_distribution": "0.20.1rc1.dev0+g506029539.cu128",
+            "vllm": "0.20.1rc1.dev0+g506029539",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "observed",
+    [
+        {
+            "vllm_distribution": "0.20.1rc1.dev0+g506029539.cu129",
+            "vllm": "0.20.1rc1.dev0+g506029539",
+        },
+        {
+            "vllm_distribution": "0.20.1rc1.dev0+g506029539.cu128",
+            "vllm": "0.20.1rc1.dev0+gOTHER",
+        },
+        {"vllm_distribution": "0.20.1rc1.dev0+g506029539.cu128", "vllm": "dev"},
+        {"vllm": "0.20.1rc1.dev0+g506029539"},
+    ],
+)
+def test_wrong_or_unproven_vllm_build_rejects(observed):
+    with pytest.raises(ValueError, match="vLLM"):
+        validate_vllm_versions("0.20.1rc1.dev0+g506029539.cu128", observed)
 
 
 @pytest.fixture
