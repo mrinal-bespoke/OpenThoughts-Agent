@@ -124,6 +124,8 @@ class Manifest:
         # changing clusters or concurrency. Task order is not an identity change.
         data = self.as_dict()
         data["tasks"] = sorted(data["tasks"], key=lambda t: t["id"])
+        for task in data["tasks"]:
+            del task["path"]
         return "ae32-" + digest({"manifest": data, "profile": PROFILE})[:32]
 
 
@@ -164,8 +166,9 @@ def render_harbor(manifest, run_dir, concurrency=1, port=8000):
                 "import_path": "eval.autoeval32k.harbor_adapter:StrictTerminus2",
                 "model_name": "hosted_vllm/" + manifest.run_id,
                 "override_timeout_sec": budgets["agent_seconds"],
+                "override_setup_timeout_sec": budgets["environment_seconds"],
                 "kwargs": {
-                        "manifest_json": manifest.serialized,
+                    "manifest_json": manifest.serialized,
                     "api_base": f"http://127.0.0.1:{port}/v1",
                     "temperature": 0.6,
                     "enable_summarize": False,

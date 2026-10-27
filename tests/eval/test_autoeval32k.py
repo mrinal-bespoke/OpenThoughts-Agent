@@ -15,8 +15,7 @@ from eval.autoeval32k.protocol import (
 from eval.autoeval32k.audit import audit_results
 
 
-@pytest.fixture
-def manifest_data():
+def example_manifest():
     return {
         "version": 1,
         "model": {
@@ -51,12 +50,23 @@ def manifest_data():
     }
 
 
+@pytest.fixture
+def manifest_data():
+    return example_manifest()
+
+
 def test_contract_is_opt_in_deterministic_and_revision_specific(manifest_data):
     first = Manifest.parse(manifest_data)
     assert first.run_id == Manifest.parse(copy.deepcopy(manifest_data)).run_id
     manifest_data["model"]["revision"] = "e" * 40
     assert first.run_id != Manifest.parse(manifest_data).run_id
     assert first.as_dict()["model"]["revision"] == "a" * 40
+
+
+def test_moving_identical_tasks_does_not_create_a_new_attempt(manifest_data):
+    first = Manifest.parse(manifest_data)
+    manifest_data["tasks"][0]["path"] = "/different-machine/hello"
+    assert first.run_id == Manifest.parse(manifest_data).run_id
 
 
 @pytest.mark.parametrize(

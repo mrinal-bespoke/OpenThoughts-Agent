@@ -48,3 +48,8 @@ DependencyNeverSatisfied jobs count. Held jobs remain untouched.
 Stage 0 CPU gate passed. Stage 1 implementation/testing in progress. TACC live
 gate blocked by rejected SSH authentication; reported once, no retry pending
 human renewal. No cluster writes or launches from this implementation yet.
+
+Stage 1 local checkpoint: intake, queue, runner, strict adapters and audit have
+155 passing focused/neighboring tests. Live qualification is outstanding. Full
+eval regression is blocked by missing dependency/source imports outside this
+change. Concurrency remains 1; Jupiter is rejected by deployment validation.
