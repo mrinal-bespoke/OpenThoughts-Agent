@@ -120,6 +120,7 @@ def test_existing_snapshot_one_create_and_idempotent_exact_cleanup(manifest, tmp
             service, None, force_build=False
         )
         assert params.snapshot == "existing" and params.ephemeral is True
+        assert params.os_user == "root"
         assert params.auto_stop_interval > 0 and params.auto_delete_interval == 0
         await env._create_sandbox(params, service)
         with pytest.raises(FileExistsError):
@@ -130,6 +131,22 @@ def test_existing_snapshot_one_create_and_idempotent_exact_cleanup(manifest, tmp
         evidence = json.loads((tmp_path / "trial/sandbox-cleanup.json").read_text())
         assert evidence["status"] == "delete_completed"
         assert evidence["sandbox_id"] == "sandbox-unique"
+
+    asyncio.run(scenario())
+
+
+def test_nonroot_creation_rejected_before_intent(manifest, tmp_path):
+    async def scenario():
+        env = environment(manifest, tmp_path)
+        service = Service()
+        params = await env._resolve_start_sandbox_params(
+            service, None, force_build=False
+        )
+        params.os_user = "daytona"
+        with pytest.raises(ValueError, match="Create parameters"):
+            await env._create_sandbox(params, service)
+        assert service.creates == 0
+        assert not (tmp_path / "trial/sandbox-create-intent.json").exists()
 
     asyncio.run(scenario())
 

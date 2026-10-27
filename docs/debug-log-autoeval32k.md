@@ -127,3 +127,23 @@ operation. One fresh login-node diagnostic, no model; hard process cap210s
 includes existing failure cleanup. No command retry or transport alteration is
 added by the instrumentation. Follow with one exact-output exec and deletion.
 The original 1105146 allocation has now disappeared from the live queue.
+
+The real Harbor login diagnostic reproduced the failure: create/session submit
+passed, then 761 status queries never returned an exit code. Setup stopped at
+60 seconds; total 61.375s including cleanup. Exact environment
+d8314a82-2543-41b3-bfcb-3bfc4c6885a2 independently returned NotFound. Results
+remain in autoeval32k-tacc-harbor-setup-20261027; no model was loaded.
+
+A fresh 8.601s wrapper isolation identified the user mismatch. The existing
+snapshot starts as uid1001(daytona). Plain bash printed WRAPPER_OK and exited0;
+the otherwise identical su-root wrapper had no exit after5s, with su still in
+the process tree. No API request timeout or authentication exception occurred.
+Temporary environment5b242de3-a492-4ffa-8151-65af9e7d8ab0 was deleted. This
+supports a root-user switch blocking, not a generally unavailable transport.
+
+Set the disposable environment's explicit os_user=root when creating from the
+existing snapshot, matching Harbor's privileged directory preparation. Reject
+nonroot create-parameter drift before intent. Do not modify the snapshot,
+shared Harbor/runtime, shell wrappers, polling, or60s budget. Two regression
+checks were red before this change;134 autoeval tests now pass and Ruff passes.
+Live setup verification with this fix is still required before another model run.
