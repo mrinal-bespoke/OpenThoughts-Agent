@@ -85,6 +85,13 @@ def plan(manifest, settings):
     ]
     seconds = settings["walltime_seconds"]
     walltime = f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+    library_probe = shlex.join(
+        [
+            settings["serve_python"],
+            "-c",
+            "import sysconfig; print(sysconfig.get_path('purelib') + '/torch/lib')",
+        ]
+    )
     # Match the already proven Vista compiler/CUDA setup, in this job only.
     setup = (
         "set -eu; umask 077; ulimit -c 0; module purge; "
@@ -94,6 +101,9 @@ def plan(manifest, settings):
         "export PATH="
         + shlex.quote(str(Path(settings["serve_python"]).parent))
         + ':"$PATH"; '
+        + 'export LD_LIBRARY_PATH="$('
+        + library_probe
+        + '):${LD_LIBRARY_PATH:-}"; '
         "exec " + shlex.join(argv)
     )
     command = [
