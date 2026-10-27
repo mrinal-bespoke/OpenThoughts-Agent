@@ -13,5 +13,8 @@ missing snapshot cannot build; serialized token overflow rejects before request;
 effective Harbor schema matches. Live gate: separately owned synthetic smoke
 with GPU BF16, generated response, compute Daytona command, agent and cleanup.
 
-Not complete until live gate passes. Current access blocker prevents deployment
-and live qualification. Concurrency remains 1. Jupiter is rejected by the CLI.
+Not complete until live gate passes. Access renewed and verified October 27.
+Reuse proven TACC serving dependencies, pinned model cache (content verified)
+and the existing daytona-small snapshot. One synthetic task, five-minute queue
+wait cap and fifteen-minute allocation cap; never submit an automatic retry.
+Concurrency remains 1. Jupiter is rejected by the CLI.

@@ -30,7 +30,7 @@ def validate_settings(settings):
         "walltime_seconds",
         "concurrency",
     }
-    optional = {"credential_file"}
+    optional = {"credential_file", "checkpoint_cache"}
     if (
         not isinstance(settings, dict)
         or not required <= settings.keys()

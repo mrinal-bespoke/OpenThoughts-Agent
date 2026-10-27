@@ -5,7 +5,7 @@ task inventory. It does not use the existing listener, resume old runs, register
 scores, upload traces, build snapshots, or discover models automatically.
 
 Status: locally tested implementation, **not live-qualified on TACC yet**. TACC
-access renewal is required for deployment and a synthetic smoke. Concurrency is
+access is renewed; a synthetic smoke is still required. Concurrency is
 locked to 1. Jupiter, automatic checkpoint watching, MoE/multi-node serving,
 pass@8, and BPB are not implemented here.
 
@@ -59,6 +59,11 @@ python -m eval.autoeval32k.intake \
 Deployment settings supply `cluster: "tacc"`, your `account` and `partition`,
 absolute `python`, `serve_python`, `repo_root`, `harbor_root`, `run_root`,
 `state_root`, `walltime_seconds`, and `concurrency: 1`. Optionally supply
+`checkpoint_cache` for read-only reuse of existing Hugging Face cache bytes.
+Every selected weight/tokenizer file is checked against immutable-revision
+upstream metadata before private references are staged. Corruption or missing
+files fails closed. No fallback download occurs when this option is set.
+Optionally supply
 `credential_file` pointing to an existing private env file. Only
 `DAYTONA_API_KEY`/`DAYTONA_DATA_API_KEY` assignments are read; the file is never
 executed, copied, or printed. Do not put credential values in JSON or argv.
@@ -87,8 +92,9 @@ queue entries alone are not terminal evidence.
 ## Execution and evidence
 
 Each fresh run has an immutable control bundle and a separate new output folder.
-The compute runner downloads the exact checkpoint into a private cache; external
-cache reuse is disabled until its bytes can be verified. It checks the template,
+The compute runner downloads the exact checkpoint into a private cache or
+verifies the configured read-only cache. Preparation runs in serving Python
+under a startup deadline, reusing its tokenizer dependencies. It checks the template,
 runtime, BF16 GPU operation and generated text, stages verified task copies, then
 executes Harbor using only the supplied snapshots.
 

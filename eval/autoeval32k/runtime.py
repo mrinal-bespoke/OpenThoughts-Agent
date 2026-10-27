@@ -11,6 +11,7 @@ import os
 import signal
 import shutil
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -61,9 +62,12 @@ def stage_tasks(manifest, run_dir):
 
 def check_runtime(manifest, harbor_root):
     """Require the installed Harbor package to come from the exact clean checkout."""
+    root = Path(harbor_root).resolve()
+    # Reuse installed dependencies with a private, pinned source checkout.
+    # This changes only this process, never the shared installed environment.
+    sys.path.insert(0, str(root / "src"))
     import harbor
 
-    root = Path(harbor_root).resolve()
     if not Path(harbor.__file__).resolve().is_relative_to(root / "src"):
         raise ValueError("Installed Harbor is not from the configured checkout")
     commit = subprocess.check_output(
@@ -291,16 +295,31 @@ def run(manifest, settings, run_dir):
             raise ValueError("Harbor ignored required protocol fields")
         write_new(run_dir / "harbor-config.json", config)
         model = manifest.as_dict()["model"]
-        # A fresh private cache avoids trusting a directory merely named after a
-        # revision. Reuse of an external cache awaits full artifact verification.
-        from huggingface_hub import snapshot_download
-
-        snapshot = snapshot_download(
-            repo_id=model["repo"],
-            revision=model["revision"],
-            cache_dir=run_dir / "hf-cache",
-        )
-        snapshot = Path(snapshot).absolute()
+        # Tokenizer dependencies already live in the serving environment. Bound
+        # cache verification/download too, before allocating time to vLLM startup.
+        checkpoint_command = [
+            settings["serve_python"],
+            "-B",
+            "-m",
+            "eval.autoeval32k.checkpoint",
+            "--manifest",
+            str(run_dir / "manifest.json"),
+            "--run-dir",
+            str(run_dir),
+        ]
+        if settings.get("checkpoint_cache"):
+            checkpoint_command += ["--cache", settings["checkpoint_cache"]]
+        with (run_dir / "checkpoint.log").open("x") as log:
+            subprocess.run(
+                checkpoint_command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=manifest.as_dict()["budgets"]["startup_seconds"],
+            )
+        snapshot = Path(
+            json.loads((run_dir / "checkpoint.json").read_text())["snapshot"]
+        ).absolute()
         if (
             snapshot.name != model["revision"]
             or snapshot.parent.name != "snapshots"
@@ -308,24 +327,6 @@ def run(manifest, settings, run_dir):
             != "models--" + model["repo"].replace("/", "--")
         ):
             raise ValueError("Snapshot path does not match exact HF repo/revision")
-        from transformers import AutoTokenizer
-
-        if (
-            json.loads((snapshot / "config.json").read_text()).get("model_type")
-            != "qwen3"
-        ):
-            raise ValueError(
-                "Downloaded checkpoint is not a supported dense Qwen3 model"
-            )
-        tokenizer = AutoTokenizer.from_pretrained(
-            snapshot, local_files_only=True, trust_remote_code=False
-        )
-        template = tokenizer.chat_template
-        if (
-            not isinstance(template, str)
-            or hashlib.sha256(template.encode()).hexdigest() != model["template_sha256"]
-        ):
-            raise ValueError("Tokenizer template differs from manifest")
         # vLLM version and GPU math are checked in its actual Python environment.
         probe = subprocess.run(
             [

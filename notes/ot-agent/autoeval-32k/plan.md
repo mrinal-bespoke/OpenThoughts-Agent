@@ -45,11 +45,18 @@ DependencyNeverSatisfied jobs count. Held jobs remain untouched.
 
 ## Status
 
-Stage 0 CPU gate passed. Stage 1 implementation/testing in progress. TACC live
-gate blocked by rejected SSH authentication; reported once, no retry pending
-human renewal. No cluster writes or launches from this implementation yet.
+Stage 0 CPU gate passed. Stage 1 implementation/testing in progress. Human
+renewed TACC access October 27; bounded reads now succeed. A private pinned
+Harbor checkout reuses existing dependencies without changing the installed
+environment. No smoke allocation has been submitted yet.
 
 Stage 1 local checkpoint: intake, queue, runner, strict adapters and audit have
-155 passing focused/neighboring tests. Live qualification is outstanding. Full
+159 passing focused/neighboring tests. Live qualification is outstanding. Full
 eval regression is blocked by missing dependency/source imports outside this
 change. Concurrency remains 1; Jupiter is rejected by deployment validation.
+
+After the minimal TACC end-to-end gate passes, the human requested moving the
+reusable implementation, tests and docs to open-thoughts/open-thoughts-next.
+Do not migrate an unvalidated implementation or copy credentials, site-specific
+deployment settings, old results or campaign monitors. Concurrency and Jupiter
+follow that move.
