@@ -16,7 +16,7 @@
   "controller_limit_seconds": 660, "agent_limit_seconds": 180, "max_agent_turns": 4,
   "snapshot": "daytona-small", "snapshot_id": "dad882b3-a047-4715-8713-bddec50bb7ca",
   "sandbox_limit": 1, "sandbox_ttl_minutes": 15,
-  "sandbox_label_purpose": "jupiter-smoke-v3-20261027",
+  "sandbox_label_purpose": "jupiter-smoke-v3a-20261027",
   "proxy_destination_allowlist": ["daytona.io:443", "daytona.works:443"],
   "benchmark_runs": 0, "new_snapshots": 0, "automatic_retries": 0,
   "shared_runtime_modifications": false, "old_results_modifications": false,

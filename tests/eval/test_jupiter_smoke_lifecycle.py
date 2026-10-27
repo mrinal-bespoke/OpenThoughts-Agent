@@ -2,7 +2,24 @@
 
 import pytest
 
-from scripts.smoke.jupiter32k.lifecycle import proxy_window, validate_lifetime
+from scripts.smoke.jupiter32k.lifecycle import (
+    proxy_window,
+    select_bind,
+    validate_lifetime,
+)
+
+
+def test_bind_uses_only_internal_interface():
+    assert (
+        select_bind("10.128.1.3 10.99.0.3 134.94.0.133 2001:638:404::85")
+        == "10.128.1.3"
+    )
+
+
+@pytest.mark.parametrize("addresses", ["127.0.0.1 ::1", "10.128.1.3 10.128.1.9", ""])
+def test_ambiguous_or_absent_interface_rejects(addresses):
+    with pytest.raises(RuntimeError):
+        select_bind(addresses)
 
 
 @pytest.mark.parametrize("hours", [0, 6.5, 7.99])

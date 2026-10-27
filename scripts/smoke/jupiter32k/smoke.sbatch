@@ -6,15 +6,15 @@
 #SBATCH --cpus-per-task=18
 #SBATCH --gres=gpu:4
 #SBATCH --time=00:30:00
-#SBATCH --job-name=jupiter-smoke-v3-32k
-#SBATCH --output=/e/scratch/reformo/kumar37/jupiter-smoke-v3-20261027/slurm-%j.log
+#SBATCH --job-name=jupiter-smoke-v3a-32k
+#SBATCH --output=/e/scratch/reformo/kumar37/jupiter-smoke-v3a-20261027/slurm-%j.log
 #SBATCH --export=NONE
 #SBATCH --no-requeue
 set -euo pipefail
 umask 077
 ulimit -c 0
 BASE=/e/scratch/reformo/kumar37/jupiter-vista-parity-20261018
-SMOKE=/e/scratch/reformo/kumar37/jupiter-smoke-v3-20261027
+SMOKE=/e/scratch/reformo/kumar37/jupiter-smoke-v3a-20261027
 cd "$SMOKE"
 unset PYTHONPATH PYTHONHOME LD_PRELOAD CUDA_VISIBLE_DEVICES
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 SLURM_EXPORT_ENV=ALL

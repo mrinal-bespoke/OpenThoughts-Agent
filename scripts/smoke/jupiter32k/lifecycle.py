@@ -1,11 +1,24 @@
 """Bound the queue wait separately from the allocation and proxy lifetime."""
 
 import math
+import ipaddress
 
 QUEUE_SECONDS = 8 * 3600
 ALLOCATION_SECONDS = 30 * 60
 PROXY_SECONDS = 9 * 3600
 CLEANUP_SECONDS = 10 * 60
+
+
+def select_bind(addresses):
+    internal = ipaddress.ip_network("10.128.0.0/16")
+    candidates = {
+        str(ipaddress.ip_address(a))
+        for a in addresses.split()
+        if ipaddress.ip_address(a) in internal
+    }
+    if len(candidates) != 1:
+        raise RuntimeError("Cannot identify unique internal login address")
+    return candidates.pop()
 
 
 def proxy_window(now):

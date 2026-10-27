@@ -110,7 +110,7 @@ async def agent_smoke():
                 snapshot=SNAPSHOT,
                 name="jupiter-smoke-" + os.environ["SLURM_JOB_ID"],
                 labels={
-                    "purpose": "jupiter-smoke-v3-20261027",
+                    "purpose": "jupiter-smoke-v3a-20261027",
                     "slurm_job": os.environ["SLURM_JOB_ID"],
                 },
                 ephemeral=True,

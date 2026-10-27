@@ -37,3 +37,10 @@ The first SDK snapshot query hit its 30s cap. A bounded import-only diagnostic
 completed in 3.73s; a direct 15s HTTPS metadata request returned HTTP200 and
 the expected active snapshot ID. The initial SDK timeout's cause is unresolved.
 The compute SDK gate remains mandatory and will retain its own timeout.
+
+Proxy preparation stopped before credentials/process creation: getaddrinfo of
+the short hostname resolves loopback on this login node. hostname -I exposes
+10.128.1.3 plus unrelated interfaces. Select the unique 10.128/16 interface from
+that inventory and regression-test absent/ambiguous addresses. Preserve the v3
+preparation intent; use fresh v3a for the corrected attempt. No Slurm submission
+or proxy existed in v3.

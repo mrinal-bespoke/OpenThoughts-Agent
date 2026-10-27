@@ -5,15 +5,13 @@ import hashlib
 import json
 import os
 import secrets
-import socket
-import ipaddress
 import shlex
 import subprocess
 import sys
 import time
 import urllib.request
 from pathlib import Path
-from lifecycle import validate_lifetime
+from lifecycle import select_bind, validate_lifetime
 
 ROOT = Path(__file__).resolve().parent
 BASE = Path("/e/scratch/reformo/kumar37/jupiter-vista-parity-20261018")
@@ -38,17 +36,13 @@ def start():
     key = values.get("DAYTONA_DATA_API_KEY") or values.get("DAYTONA_API_KEY")
     if not key:
         raise RuntimeError("Required existing credential absent")
-    addresses = {
-        item[4][0]
-        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
-        if ipaddress.ip_address(item[4][0]) in ipaddress.ip_network("10.128.0.0/16")
-    }
-    if len(addresses) != 1:
-        raise RuntimeError("Cannot identify unique internal login address")
+    bind = select_bind(
+        subprocess.check_output(["hostname", "-I"], text=True, timeout=5)
+    )
     write(
         "private.json",
         {
-            "bind": addresses.pop(),
+            "bind": bind,
             "password": secrets.token_hex(24),
             "daytona_key": key,
         },
